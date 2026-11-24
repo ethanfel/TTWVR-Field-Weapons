@@ -25,6 +25,17 @@ int main() {
         auto velocity=hand.step({30+i*.14f,5,50},player,i);
         if (i>=20) assert(std::abs(velocity.x-2.f)<.001f);
     }
+    // Replay 60 ms of hand travel and integrate one Havok step in game space.
+    hand.clear();
+    const Vec displacement{21,-14,7};
+    hand.step({0,0,30},player,100);
+    const Vec measured=hand.step({21,-14,37},player,160);
+    const Vec native=motion::toHavokVelocity(measured);
+    assert((native*(.060f*6.99912548f)-displacement).length()<.001f);
+    const Vec incoming=motion::fromHavokVelocity(native);
+    assert((incoming-measured).length()<.001f);
+    assert(std::abs(impact::damage(3,incoming.length())-impact::damage(3,measured.length()))<.001f);
+    assert(motion::toHavokVelocity({}).length()==0);
     // Walking with the controller stationary relative to the body adds no throw.
     hand.clear();
     for (unsigned i=0;i<=80;i+=10)

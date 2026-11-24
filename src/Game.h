@@ -160,8 +160,8 @@ inline Ptr drop(Ptr pc,Ptr item,Ptr stack,Vec* pos,Vec* angles) {
     return reinterpret_cast<Fn>(0x954610)(pc,item,stack,1,pos,angles);
 }
 inline void launch(Ptr body,Vec velocity) {
-    // World-space metres/second, followed by Havok activation (JIP SetLinearVelocity).
-    float v[4]{velocity.x,velocity.y,velocity.z,0};
+    const Vec native = motion::toHavokVelocity(velocity);
+    float v[4]{native.x,native.y,native.z,0};
     std::memcpy(body+0x1b0,v,sizeof v);
     reinterpret_cast<void (__thiscall*)(Ptr)>(0xc9c1d0)(body);
 }

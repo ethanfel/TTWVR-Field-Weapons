@@ -25,8 +25,6 @@ A thrown weapon damages the first NPC or creature it physically hits. Heavier we
 
 A hard hit can also stagger the target once. Wider, taller actors resist lighter throws. For example, a thrown pistol can stagger a raider while a super mutant takes a heavier or faster throw. The target plays a brief hit animation if its skeleton has a compatible one.
 
-Physical pouch reloading still needs headset testing.
-
 ## Build
 
 Run `make package` with MinGW-w64’s i686 C++ compiler, a native C++ compiler and `zip`. The mod-manager ZIP is written to `build/`. Source is licensed under GPL-3.0-only.

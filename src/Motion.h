@@ -10,6 +10,17 @@ struct Vec {
     float length() const { return std::sqrt(x*x+y*y+z*z); }
     bool valid() const { return std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z); }
 };
+namespace motion {
+constexpr float gameUnitsPerMetre = 70.f;
+// Fallout New Vegas uses this scale for bhkWorldObject and JIP raycast positions.
+constexpr float gameUnitsPerHavokUnit = 6.99912548f;
+inline Vec toHavokVelocity(Vec metresPerSecond) {
+    return metresPerSecond * (gameUnitsPerMetre / gameUnitsPerHavokUnit);
+}
+inline Vec fromHavokVelocity(Vec havokUnitsPerSecond) {
+    return havokUnitsPerSecond * (gameUnitsPerHavokUnit / gameUnitsPerMetre);
+}
+}
 class HandMotion {
     struct Sample { Vec relative; uint32_t when; };
     std::array<Sample,32> samples{};
@@ -28,7 +39,7 @@ public:
             const auto& old=samples[(next+31-i)%32];
             unsigned ms=now-old.when;
             if (ms>100) break;
-            if (ms>=16) velocity=(relative-old.relative)*(1000.f/(70.f*ms));
+            if (ms>=16) velocity=(relative-old.relative)*(1000.f/(motion::gameUnitsPerMetre*ms));
         }
         samples[next]={relative,now}; next=(next+1)%32;
         if (count<32) ++count;

@@ -271,7 +271,8 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     if (dropped && loose(dropped) && id(ptr(dropped,0x20))==base) {
         if (clip.ammo) call(writeClip,dropped,clip.rounds,clip.ammo);
         flights.push_back({id(dropped),base,ptr(pc,0x40),velocity,now});
-        log("release ref=%08x base=%08x speed=%.2f clip=%d",id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1);
+        log("release ref=%08x base=%08x speed=%.2f clip=%d velocity_mps=%.2f,%.2f,%.2f",
+            id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1,velocity.x,velocity.y,velocity.z);
     } else log("native drop returned no loose weapon base=%08x",base);
     Ptr current=equipped(pc);
     if (ours && (!current || id(current)==0x1f4 || id(current)==base || current==previous.form))
@@ -361,7 +362,7 @@ bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
         }
     }
     flight.lastSample=now;
-    flight.incomingSpeed=field<Vec>(body,0x1b0).length();
+    flight.incomingSpeed=motion::fromHavokVelocity(field<Vec>(body,0x1b0)).length();
     if (!std::isfinite(flight.incomingSpeed)) return true;
     // An upward throw can briefly stop at the top of its arc.
     if (flight.incomingSpeed>=.18f) flight.lastMoving=now;
@@ -435,7 +436,7 @@ void __cdecl message(Message* msg) {
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.1.3 ready=%d impacts=%d",ready,hasContact!=nullptr);
+            log("version=0.1.4 ready=%d impacts=%d",ready,hasContact!=nullptr);
         }
         if (ready) frame();
     }
@@ -443,7 +444,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",4};
+    *info={1,"TTWVR Field Weapons",5};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
