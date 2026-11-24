@@ -16,6 +16,7 @@ using ReadRef=Ptr (__cdecl*)(unsigned);
 MakeRef makeRef;
 ReadRef readRef;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*writeClip,*available;
+constexpr DWORD keepHoldMs=1000;
 bool initialized,ready,loaded;
 unsigned gated, reported{};
 struct Clip { Ptr ammo{}; int rounds{}; };
@@ -323,7 +324,7 @@ void frame() {
         if (validPoint) velocity=loan.motion.step(point,origin,now);
         else loan.motion.clear();
         if (!input.grip) {
-            if (loan.holdingKeep && input.keep && now-loan.keepSince>=400) cancel("kept");
+            if (loan.holdingKeep && input.keep && now-loan.keepSince>=keepHoldMs) cancel("kept");
             else release(pc,validPoint?&point:nullptr,velocity,now);
             return;
         }
@@ -363,7 +364,7 @@ void __cdecl message(Message* msg) {
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.1.0 ready=%d",ready);
+            log("version=0.1.1 ready=%d",ready);
         }
         if (ready) frame();
     }
@@ -371,7 +372,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",1};
+    *info={1,"TTWVR Field Weapons",2};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
