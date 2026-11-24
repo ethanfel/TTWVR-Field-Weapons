@@ -15,6 +15,8 @@ Pick up a loose gun or melee weapon in Fallout: New Vegas VR and use it immediat
 | Drop or throw | Release grip. Your hand’s motion determines the throw. |
 | Keep | While gripping, hold **A** on the right hand or **X** on the left for 0.4 seconds. Keep the button down as you release grip. |
 
+A/X still operates TTWVR’s native controls. On the 10mm pistol it can eject the magazine. Release A/X before releasing grip to drop or throw after using that control.
+
 Dropping the weapon restores your previous one when its inventory copy can be identified. Condition and installed mods stay with the dropped weapon. A dropped gun remembers its magazine count when picked up again with the same ammo type.
 
 You can borrow one weapon at a time. Quest weapons, scripted pickups and explosives follow TTWVR’s ordinary pickup behavior. Saving while holding a borrowed weapon keeps it in your inventory when that save is loaded.
