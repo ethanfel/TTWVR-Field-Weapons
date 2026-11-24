@@ -23,6 +23,19 @@ inline Ptr lookup(unsigned formID) {
         if (field<unsigned>(entry,4)==formID) return ptr(entry,8);
     return nullptr;
 }
+// ProcessManager's high-process range contains the actors currently simulated in full.
+struct HighActors {
+    Ptr entries{};
+    unsigned begin{},end{};
+    HighActors() {
+        Ptr manager=reinterpret_cast<Ptr>(0x11e0e80);
+        entries=ptr(manager,8);
+        begin=field<unsigned>(manager,0x14);
+        end=field<unsigned>(manager,0x24);
+        if (!entries || end>field<unsigned short>(manager,0xc)) end=0;
+    }
+    Ptr operator[](unsigned i) const { return ptr(entries,i*4); }
+};
 inline bool loose(Ptr ref) {
     return field<unsigned char>(ref,4)==0x3a &&
            (field<unsigned>(ref,8)&(0x20|0x800))==0; // deleted / initially disabled

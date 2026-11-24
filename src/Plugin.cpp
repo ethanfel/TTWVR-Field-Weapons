@@ -7,6 +7,7 @@
 #include "Host.h"
 #include "Impact.h"
 #include "Stagger.h"
+#include "NpcThrow.h"
 #include <cstdio>
 #include <cstdarg>
 
@@ -21,7 +22,7 @@ ReadRef readRef;
 void *hasContact;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*writeClip,*available;
 constexpr DWORD keepHoldMs=1000;
-bool initialized,ready,loaded;
+bool initialized,ready,loaded,npcReady;
 unsigned gated, reported{};
 struct Clip { Ptr ammo{}; int rounds{}; };
 struct Equipment { Ptr form{},stack{}; bool out{}; int hand{}; Clip clip; unsigned healthBits{}; bool plain{}; };
@@ -52,7 +53,7 @@ struct Restoration {
     DWORD since{};
 } restoring;
 struct Flight {
-    unsigned ref, base;
+    unsigned ref, base, thrower;
     Ptr cell;
     Vec releaseVelocity;
     DWORD since, lastSample{}, lastMoving{};
@@ -98,6 +99,7 @@ end)");
     // JIP exposes the actor controller and the loose rigid body's contact lists separately.
     hasContact=scripts->compile("ref item\nref actorRef\nbegin Function {item actorRef}\n SetFunctionValue (eval (item.GetHasContact actorRef) || (actorRef.GetHasContact item))\nend");
     log("stagger_rigs=%u",stagger::initialize(scripts,arrays));
+    npcReady=GetModuleHandleW(L"kNVSE.dll") && npc::initialize(scripts);
     return gameplay && materialize && holster && readClip && readAmmo && writeClip && available && host::connect();
 }
 Clip magazine(Ptr pc) {
@@ -270,7 +272,7 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     loan={};
     if (dropped && loose(dropped) && id(ptr(dropped,0x20))==base) {
         if (clip.ammo) call(writeClip,dropped,clip.rounds,clip.ammo);
-        flights.push_back({id(dropped),base,ptr(pc,0x40),velocity,now});
+        flights.push_back({id(dropped),base,id(pc),ptr(pc,0x40),velocity,now});
         log("release ref=%08x base=%08x speed=%.2f clip=%d velocity_mps=%.2f,%.2f,%.2f",
             id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1,velocity.x,velocity.y,velocity.z);
     } else log("native drop returned no loose weapon base=%08x",base);
@@ -306,29 +308,35 @@ bool finishEquip(Ptr pc,DWORD now) {
     loan={};
     return false;
 }
-Ptr struckActor(Ptr pc, Ptr ref, Ptr node) {
-    // JIP's GetActorsByProcessingLevel 0 uses this same list. Only ask Havok for
-    // exact contact for actors near the weapon's rendered world bounds.
-    Ptr manager=reinterpret_cast<Ptr>(0x11e0e80);
-    Ptr actors=ptr(manager,8);
-    unsigned begin=field<unsigned>(manager,0x14), end=field<unsigned>(manager,0x24);
-    if (!actors || end>field<unsigned short>(manager,0xc)) return nullptr;
-    for (unsigned i=begin;i<end;++i) {
-        Ptr actor=ptr(actors,4*i);
-        if (actor==pc || (type(actor)!=0x3b && type(actor)!=0x3c)) continue;
-        unsigned life=field<unsigned>(actor,0x108);
-        Ptr actorNode=root(actor);
-        if (!actorNode || life==1 || life==2 || (field<unsigned>(actor,8)&(0x20|0x800))) continue;
-        if (!boundsNear(node,actorNode)) continue;
-        Value touching=call(hasContact,ref,actor);
-        if (touching.type==1 && touching.number) return actor;
+void npcReleased(Ptr actor,Ptr item,Ptr ammo,Vec velocity) {
+    if (ammo) call(writeClip,item,0,ammo);
+    flights.push_back({id(item),id(ptr(item,0x20)),id(actor),ptr(actor,0x40),velocity,GetTickCount()});
+    log("npc_throw actor=%08x target=%08x ref=%08x base=%08x speed=%.2f",
+        id(actor),id(ptr(actor,0x128)),id(item),id(ptr(item,0x20)),velocity.length());
+}
+bool touchingActor(Ptr actor,Ptr ref,Ptr node) {
+    if (type(actor)!=0x3b && type(actor)!=0x3c) return false;
+    unsigned life=field<unsigned>(actor,0x108);
+    Ptr actorNode=root(actor);
+    if (!actorNode || life==1 || life==2 || (field<unsigned>(actor,8)&(0x20|0x800))) return false;
+    if (!boundsNear(node,actorNode)) return false;
+    Value touching=call(hasContact,ref,actor);
+    return touching.type==1 && touching.number;
+}
+Ptr struckActor(Ptr owner,Ptr pc,Ptr ref,Ptr node) {
+    if (owner!=pc && touchingActor(pc,ref,node)) return pc;
+    HighActors actors;
+    for (unsigned i=actors.begin;i<actors.end;++i) {
+        Ptr actor=actors[i];
+        if (actor!=owner && actor!=pc && touchingActor(actor,ref,node)) return actor;
     }
     return nullptr;
 }
 // Return true when this release no longer needs tracking.
 bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
     Ptr ref=lookup(flight.ref);
-    if (ptr(pc,0x40)!=flight.cell || !loose(ref) || id(ptr(ref,0x20))!=flight.base ||
+    Ptr owner=lookup(flight.thrower);
+    if (!owner || ptr(pc,0x40)!=flight.cell || !loose(ref) || id(ptr(ref,0x20))!=flight.base ||
         host::held(0)==ref || host::held(1)==ref) return true;
     if (now-flight.since>(flight.launched?3000u:700u)) return true;
     Ptr node=root(ref);
@@ -349,15 +357,15 @@ bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
     // Havok can already have stopped or deflected the item on the contact frame.
     float damage=impact::damage(weight,flight.incomingSpeed);
     if (damage>0) {
-        if (Ptr target=struckActor(pc,ref,node)) {
+        if (Ptr target=struckActor(owner,pc,ref,node)) {
             unsigned targetID=id(target);
             float bulk=stagger::targetBulk(target);
-            dealImpactDamage(target,pc,damage);
+            dealImpactDamage(target,owner,damage);
             unsigned reaction=0;
-            if (impact::staggers(weight,flight.incomingSpeed,bulk) && lookup(targetID)==target)
+            if (target!=pc && impact::staggers(weight,flight.incomingSpeed,bulk) && lookup(targetID)==target)
                 reaction=stagger::play(target);
-            log("throw_impact ref=%08x target=%08x weight=%.2f incoming=%.2f damage=%.2f bulk=%.2f stagger_idle=%08x",
-                flight.ref,targetID,weight,flight.incomingSpeed,damage,bulk,reaction);
+            log("throw_impact ref=%08x target=%08x weight=%.2f incoming=%.2f damage=%.2f bulk=%.2f stagger_idle=%08x attacker=%08x",
+                flight.ref,targetID,weight,flight.incomingSpeed,damage,bulk,reaction,flight.thrower);
             return true;
         }
     }
@@ -377,6 +385,7 @@ void frame() {
     DWORD now=GetTickCount();
     flights.erase(std::remove_if(flights.begin(),flights.end(),
         [pc,now](Flight& flight){return finishFlight(flight,pc,now);}),flights.end());
+    if (npcReady) npc::update(pc,now,npcReleased);
     finishRestore(pc,now);
     if (pendingTake.reference) { finishPickup(pc,now); return; }
     if (loan.base) {
@@ -430,13 +439,13 @@ void frame() {
 void __cdecl message(Message* msg) {
     switch (msg->type) {
     case 1: case 2: case 6: case 7: case 8: case 14:
-        loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; gated=3;
+        npc::reset(); loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; gated=3;
         loaded=msg->type==14 || (msg->type==8 && msg->data); return;
     case 20:
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.1.4 ready=%d impacts=%d",ready,hasContact!=nullptr);
+            log("version=0.2.0 ready=%d impacts=%d npc_throws=%d",ready,hasContact!=nullptr,npcReady);
         }
         if (ready) frame();
     }
@@ -444,7 +453,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",5};
+    *info={1,"TTWVR Field Weapons",6};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

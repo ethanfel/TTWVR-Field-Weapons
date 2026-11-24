@@ -4,7 +4,7 @@ Pick up a loose gun or melee weapon in Fallout: New Vegas VR and use it immediat
 
 ## Install
 
-1. Set up Tale of Two Realities VR **1.1.7**, xNVSE and JIP LN NVSE.
+1. Set up Tale of Two Realities VR **1.1.7**, xNVSE and JIP LN NVSE. NPC throws also use kNVSE Animation Plugin.
 2. Install the [Field Weapons release ZIP](https://github.com/ethanfel/TTWVR-Field-Weapons/releases) through your mod manager, or extract it into the game’s `Data` folder. The installed file is `Data/NVSE/Plugins/TTWVRFieldWeapons.dll`.
 
 ## Controls
@@ -24,6 +24,12 @@ You can borrow one weapon at a time. Quest weapons, scripted pickups and explosi
 A thrown weapon damages the first NPC or creature it physically hits. Heavier weapons and faster impacts deal more damage. Gentle drops are harmless, and the weapon stays in the world for you to pick up again.
 
 A hard hit can also stagger the target once. Wider, taller actors resist lighter throws. For example, a thrown pistol can stagger a raider while a super mutant takes a heavier or faster throw. The target plays a brief hit animation if its skeleton has a compatible one.
+
+## NPC combat
+
+A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons.
+
+The pistol leaves the NPC’s hand during the throwing animation. You can dodge it and pick it up where it lands. A hit uses the same weight and speed rules as a player throw.
 
 ## Build
 
