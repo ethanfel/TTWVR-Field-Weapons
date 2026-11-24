@@ -5,6 +5,7 @@
 #include "Api.h"
 #include "Game.h"
 #include "Host.h"
+#include "Impact.h"
 #include <cstdio>
 #include <cstdarg>
 
@@ -15,6 +16,7 @@ using MakeRef=Ptr (__stdcall*)(Ptr,Ptr,int,Ptr);
 using ReadRef=Ptr (__cdecl*)(unsigned);
 MakeRef makeRef;
 ReadRef readRef;
+void *hasContact;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*writeClip,*available;
 constexpr DWORD keepHoldMs=1000;
 bool initialized,ready,loaded;
@@ -47,7 +49,15 @@ struct Restoration {
     Ptr cell{}, initial{};
     DWORD since{};
 } restoring;
-struct Flight { unsigned ref{}; Vec velocity; DWORD since{}; } flight;
+struct Flight {
+    unsigned ref, base;
+    Ptr cell;
+    Vec releaseVelocity;
+    DWORD since, lastSample{}, lastMoving{};
+    float incomingSpeed{};
+    bool launched{};
+};
+std::vector<Flight> flights;
 void log(const char* format,...) {
     FILE* f=std::fopen("Data/NVSE/Plugins/TTWVRFieldWeapons.log","a");
     if (!f) return;
@@ -83,6 +93,8 @@ begin Function {item rounds ammo}
  item.AuxVarSetRef "_TTWVRFieldMagazine" ammo 1
 end)");
     available=scripts->compile("ref ammo\nbegin Function {ammo}\n SetFunctionValue (player.GetItemCount ammo)\nend");
+    // JIP exposes the actor controller and the loose rigid body's contact lists separately.
+    hasContact=scripts->compile("ref item\nref actorRef\nbegin Function {item actorRef}\n SetFunctionValue (eval (item.GetHasContact actorRef) || (actorRef.GetHasContact item))\nend");
     return gameplay && materialize && holster && readClip && readAmmo && writeClip && available && host::connect();
 }
 Clip magazine(Ptr pc) {
@@ -255,7 +267,7 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     loan={};
     if (dropped && loose(dropped) && id(ptr(dropped,0x20))==base) {
         if (clip.ammo) call(writeClip,dropped,clip.rounds,clip.ammo);
-        flight={id(dropped),velocity,now};
+        flights.push_back({id(dropped),base,ptr(pc,0x40),velocity,now});
         log("release ref=%08x base=%08x speed=%.2f clip=%d",id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1);
     } else log("native drop returned no loose weapon base=%08x",base);
     Ptr current=equipped(pc);
@@ -290,21 +302,73 @@ bool finishEquip(Ptr pc,DWORD now) {
     loan={};
     return false;
 }
-void stepFlight(DWORD now) {
-    if (!flight.ref) return;
-    Ptr ref=lookup(flight.ref);
-    if (now-flight.since>700 || !loose(ref) || host::held(0)==ref || host::held(1)==ref) { flight={}; return; }
-    if (Ptr body=mobileBody(root(ref))) {
-        if (flight.velocity.length()>.18f) launch(body,flight.velocity);
-        log("world_body ref=%08x speed=%.2f",flight.ref,flight.velocity.length());
-        flight={};
+Ptr struckActor(Ptr pc, Ptr ref, Ptr node) {
+    // JIP's GetActorsByProcessingLevel 0 uses this same list. Only ask Havok for
+    // exact contact for actors near the weapon's rendered world bounds.
+    Ptr manager=reinterpret_cast<Ptr>(0x11e0e80);
+    Ptr actors=ptr(manager,8);
+    unsigned begin=field<unsigned>(manager,0x14), end=field<unsigned>(manager,0x24);
+    if (!actors || end>field<unsigned short>(manager,0xc)) return nullptr;
+    for (unsigned i=begin;i<end;++i) {
+        Ptr actor=ptr(actors,4*i);
+        if (actor==pc || (type(actor)!=0x3b && type(actor)!=0x3c)) continue;
+        unsigned life=field<unsigned>(actor,0x108);
+        Ptr actorNode=root(actor);
+        if (!actorNode || life==1 || life==2 || (field<unsigned>(actor,8)&(0x20|0x800))) continue;
+        if (!boundsNear(node,actorNode)) continue;
+        Value touching=call(hasContact,ref,actor);
+        if (touching.type==1 && touching.number) return actor;
     }
+    return nullptr;
+}
+// Return true when this release no longer needs tracking.
+bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
+    Ptr ref=lookup(flight.ref);
+    if (ptr(pc,0x40)!=flight.cell || !loose(ref) || id(ptr(ref,0x20))!=flight.base ||
+        host::held(0)==ref || host::held(1)==ref) return true;
+    if (now-flight.since>(flight.launched?3000u:700u)) return true;
+    Ptr node=root(ref);
+    Ptr body=mobileBody(node);
+    if (!body) return flight.launched;
+    float weight=field<float>(ptr(ref,0x20),0x90);
+    if (!flight.launched) {
+        float speed=flight.releaseVelocity.length();
+        if (speed>.18f) launch(body,flight.releaseVelocity);
+        log("world_body ref=%08x speed=%.2f",flight.ref,speed);
+        if (!hasContact || impact::damage(weight,speed)<=0) return true;
+        flight.launched=true;
+        flight.since=flight.lastSample=flight.lastMoving=now;
+        flight.incomingSpeed=speed;
+        return false;
+    }
+    if (now-flight.lastSample>250) return true;
+    // Havok can already have stopped or deflected the item on the contact frame.
+    float damage=impact::damage(weight,flight.incomingSpeed);
+    if (damage>0) {
+        if (Ptr target=struckActor(pc,ref,node)) {
+            unsigned targetID=id(target);
+            dealImpactDamage(target,pc,damage);
+            log("throw_impact ref=%08x target=%08x weight=%.2f incoming=%.2f damage=%.2f",
+                flight.ref,targetID,weight,flight.incomingSpeed,damage);
+            return true;
+        }
+    }
+    flight.lastSample=now;
+    flight.incomingSpeed=field<Vec>(body,0x1b0).length();
+    if (!std::isfinite(flight.incomingSpeed)) return true;
+    // An upward throw can briefly stop at the top of its arc.
+    if (flight.incomingSpeed>=.18f) flight.lastMoving=now;
+    return now-flight.lastMoving>150;
 }
 void frame() {
     Ptr pc=player();
-    if (!pc || !ptr(pc,0x40)) return;
+    if (!pc || !ptr(pc,0x40)) {
+        flights.clear();
+        return;
+    }
     DWORD now=GetTickCount();
-    stepFlight(now);
+    flights.erase(std::remove_if(flights.begin(),flights.end(),
+        [pc,now](Flight& flight){return finishFlight(flight,pc,now);}),flights.end());
     finishRestore(pc,now);
     if (pendingTake.reference) { finishPickup(pc,now); return; }
     if (loan.base) {
@@ -358,13 +422,13 @@ void frame() {
 void __cdecl message(Message* msg) {
     switch (msg->type) {
     case 1: case 2: case 6: case 7: case 8: case 14:
-        loan={}; flight={}; pendingTake={}; restoring={}; reported=0; gated=3;
+        loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; gated=3;
         loaded=msg->type==14 || (msg->type==8 && msg->data); return;
     case 20:
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.1.1 ready=%d",ready);
+            log("version=0.1.2 ready=%d impacts=%d",ready,hasContact!=nullptr);
         }
         if (ready) frame();
     }
@@ -372,7 +436,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",2};
+    *info={1,"TTWVR Field Weapons",3};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

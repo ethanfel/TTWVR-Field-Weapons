@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "../src/Motion.h"
+#include "../src/Impact.h"
 #include <cassert>
 int main() {
+    assert(impact::damage(12,0)==0);
+    assert(impact::damage(3,impact::minimumSpeed)==0);
+    assert(impact::damage(0,5)==0 && impact::damage(-1,5)==0);
+    assert(impact::damage(3,NAN)==0 && impact::damage(INFINITY,5)==0);
+    assert(impact::damage(3,3)>0 && impact::damage(3,3)<impact::damage(6,3));
+    assert(impact::damage(6,3)<impact::damage(6,5));
+    assert(impact::damage(10000,12)==impact::maximumDamage);
     HandMotion hand;
     Vec player{};
     for (unsigned i=0;i<=90;i+=10) {

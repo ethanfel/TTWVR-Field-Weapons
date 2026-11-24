@@ -21,7 +21,9 @@ Dropping the weapon restores your previous one when its inventory copy can be id
 
 You can borrow one weapon at a time. Quest weapons, scripted pickups and explosives follow TTWVR’s ordinary pickup behavior. Saving while holding a borrowed weapon keeps it in your inventory when that save is loaded.
 
-Throws use Fallout’s object physics. In a controlled pistol impact, a super mutant stayed at 100 HP throughout contact. Field Weapons adds no impact damage. Physical pouch reloading still needs headset testing.
+A thrown weapon damages the first NPC or creature it physically hits. Heavier weapons and faster impacts deal more damage. Gentle drops are harmless, and the weapon stays in the world for you to pick up again.
+
+Physical pouch reloading still needs headset testing.
 
 ## Build
 

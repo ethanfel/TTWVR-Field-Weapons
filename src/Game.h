@@ -165,6 +165,20 @@ inline void launch(Ptr body,Vec velocity) {
     std::memcpy(body+0x1b0,v,sizeof v);
     reinterpret_cast<void (__thiscall*)(Ptr)>(0xc9c1d0)(body);
 }
+inline bool boundsNear(Ptr a, Ptr b) {
+    struct Bound { Vec center; float radius; };
+    Ptr left=ptr(a,0x20), right=ptr(b,0x20);
+    if (!left || !right) return true;
+    Bound w=field<Bound>(left,0), actor=field<Bound>(right,0);
+    if (!w.center.valid() || !actor.center.valid() || !(w.radius>0 && actor.radius>0)) return true;
+    // Allow for movement between the renderer and physics callbacks.
+    return (w.center-actor.center).length() <= w.radius+actor.radius+128.f;
+}
+inline void dealImpactDamage(Ptr actor, Ptr attacker, float amount) {
+    // Actor::DamageHealthAndFatigue applies game difficulty and records the source.
+    using Damage=void (__thiscall*)(Ptr,float,float,Ptr);
+    field<Damage>(ptr(actor,0),0x338)(actor,amount,0.f,attacker);
+}
 inline bool eligible(Ptr ref) {
     if (!loose(ref) || quantity(ref+0x44)!=1) return false;
     Ptr form=ptr(ref,0x20);
