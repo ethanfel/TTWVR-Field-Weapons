@@ -6,12 +6,14 @@
 #include "Game.h"
 #include "Host.h"
 #include "Impact.h"
+#include "Stagger.h"
 #include <cstdio>
 #include <cstdarg>
 
 namespace {
 using namespace game;
 Scripts* scripts;
+Arrays* arrays;
 using MakeRef=Ptr (__stdcall*)(Ptr,Ptr,int,Ptr);
 using ReadRef=Ptr (__cdecl*)(unsigned);
 MakeRef makeRef;
@@ -95,6 +97,7 @@ end)");
     available=scripts->compile("ref ammo\nbegin Function {ammo}\n SetFunctionValue (player.GetItemCount ammo)\nend");
     // JIP exposes the actor controller and the loose rigid body's contact lists separately.
     hasContact=scripts->compile("ref item\nref actorRef\nbegin Function {item actorRef}\n SetFunctionValue (eval (item.GetHasContact actorRef) || (actorRef.GetHasContact item))\nend");
+    log("stagger_rigs=%u",stagger::initialize(scripts,arrays));
     return gameplay && materialize && holster && readClip && readAmmo && writeClip && available && host::connect();
 }
 Clip magazine(Ptr pc) {
@@ -347,9 +350,13 @@ bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
     if (damage>0) {
         if (Ptr target=struckActor(pc,ref,node)) {
             unsigned targetID=id(target);
+            float bulk=stagger::targetBulk(target);
             dealImpactDamage(target,pc,damage);
-            log("throw_impact ref=%08x target=%08x weight=%.2f incoming=%.2f damage=%.2f",
-                flight.ref,targetID,weight,flight.incomingSpeed,damage);
+            unsigned reaction=0;
+            if (impact::staggers(weight,flight.incomingSpeed,bulk) && lookup(targetID)==target)
+                reaction=stagger::play(target);
+            log("throw_impact ref=%08x target=%08x weight=%.2f incoming=%.2f damage=%.2f bulk=%.2f stagger_idle=%08x",
+                flight.ref,targetID,weight,flight.incomingSpeed,damage,bulk,reaction);
             return true;
         }
     }
@@ -428,7 +435,7 @@ void __cdecl message(Message* msg) {
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.1.2 ready=%d impacts=%d",ready,hasContact!=nullptr);
+            log("version=0.1.3 ready=%d impacts=%d",ready,hasContact!=nullptr);
         }
         if (ready) frame();
     }
@@ -436,11 +443,12 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",3};
+    *info={1,"TTWVR Field Weapons",4};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
     scripts=static_cast<Scripts*>(n->query(6));
+    arrays=static_cast<Arrays*>(n->query(5));
     auto data=static_cast<Data*>(n->query(7));
     auto messages=static_cast<Messages*>(n->query(2));
     if (!scripts || !scripts->compile || !data || !messages) return false;

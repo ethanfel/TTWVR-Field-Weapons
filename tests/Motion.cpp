@@ -10,6 +10,15 @@ int main() {
     assert(impact::damage(3,3)>0 && impact::damage(3,3)<impact::damage(6,3));
     assert(impact::damage(6,3)<impact::damage(6,5));
     assert(impact::damage(10000,12)==impact::maximumDamage);
+    const float raider=impact::relativeBulk(2.89f,18.29f);
+    const float mutant=impact::relativeBulk(6.02f,21.83f);
+    assert(impact::staggers(3,2.4f,raider));
+    assert(!impact::staggers(3,2.4f,mutant));
+    assert(impact::staggers(12,2.4f,mutant));
+    assert(!impact::staggers(12,impact::minimumSpeed,raider));
+    assert(!impact::staggers(3,2.4f,impact::relativeBulk(0,18)));
+    assert(!impact::staggers(NAN,2.4f,raider));
+    assert(!impact::staggers(12,2.4f,impact::relativeBulk(15.f,48.f)));
     HandMotion hand;
     Vec player{};
     for (unsigned i=0;i<=90;i+=10) {

@@ -23,6 +23,8 @@ You can borrow one weapon at a time. Quest weapons, scripted pickups and explosi
 
 A thrown weapon damages the first NPC or creature it physically hits. Heavier weapons and faster impacts deal more damage. Gentle drops are harmless, and the weapon stays in the world for you to pick up again.
 
+A hard hit can also stagger the target once. Wider, taller actors resist lighter throws. For example, a thrown pistol can stagger a raider while a super mutant takes a heavier or faster throw. The target plays a brief hit animation if its skeleton has a compatible one.
+
 Physical pouch reloading still needs headset testing.
 
 ## Build

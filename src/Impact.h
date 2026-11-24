@@ -13,4 +13,17 @@ inline float damage(float weight, float incomingSpeed) {
         weight <= 0 || incomingSpeed <= minimumSpeed) return 0;
     return std::min(maximumDamage, 2.f * std::sqrt(weight) * (incomingSpeed - minimumSpeed));
 }
+
+// Compare collision volumes in the controller's own units. These reference
+// dimensions were measured on an adult raider in the New Vegas VR runtime.
+inline float relativeBulk(float radius, float height) {
+    if (!std::isfinite(radius) || !std::isfinite(height) || radius<=0 || height<=0) return 0;
+    float widthRatio=radius/2.89f;
+    return std::clamp(widthRatio*widthRatio*(height/18.29f),.25f,32.f);
+}
+inline bool staggers(float weight, float speed, float bulk) {
+    if (!std::isfinite(weight) || !std::isfinite(speed) || !std::isfinite(bulk) ||
+        weight<=0 || speed<=minimumSpeed || bulk<=0) return false;
+    return weight*(speed-minimumSpeed) >= 2.7f*std::pow(bulk,.75f);
+}
 }
