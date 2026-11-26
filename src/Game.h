@@ -79,6 +79,10 @@ inline Ptr extra(Ptr list, unsigned kind) {
         if (type(n)==kind) return n;
     return nullptr;
 }
+inline void removeExtra(Ptr list,unsigned kind) {
+    using RemoveByType=void (__thiscall*)(Ptr,unsigned);
+    reinterpret_cast<RemoveByType>(0x410140)(list,kind);
+}
 inline int quantity(Ptr stack) {
     Ptr count=extra(stack,0x24);
     return count ? field<short>(count,0xc) : 1;
@@ -145,11 +149,9 @@ inline Ptr splitOne(Ptr entry,Ptr stack) {
     std::memset(copy,0,0x20);
     *reinterpret_cast<unsigned*>(copy)=0x10143e8;
     using Copy=void (__thiscall*)(Ptr,Ptr,bool);
-    using Remove=void (__thiscall*)(Ptr,unsigned);
     reinterpret_cast<Copy>(0x412490)(copy,stack,false);
-    auto remove=reinterpret_cast<Remove>(0x410140);
-    for (unsigned type:{0x24u,0x16u,0x17u,0x4au}) if (extra(copy,type)) remove(copy,type);
-    if (remain==1) remove(stack,0x24);
+    for (unsigned type:{0x24u,0x16u,0x17u,0x4au}) if (extra(copy,type)) removeExtra(copy,type);
+    if (remain==1) removeExtra(stack,0x24);
     else std::memcpy(count+0xc,&remain,sizeof remain);
     // Prepend without changing the address of the embedded head node.
     std::memcpy(node,head,8);

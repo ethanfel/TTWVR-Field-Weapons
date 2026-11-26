@@ -99,7 +99,7 @@ end)");
     // JIP exposes the actor controller and the loose rigid body's contact lists separately.
     hasContact=scripts->compile("ref item\nref actorRef\nbegin Function {item actorRef}\n SetFunctionValue (eval (item.GetHasContact actorRef) || (actorRef.GetHasContact item))\nend");
     log("stagger_rigs=%u",stagger::initialize(scripts,arrays));
-    npcReady=GetModuleHandleW(L"kNVSE.dll") && npc::initialize(scripts);
+    npcReady=GetModuleHandleW(L"kNVSE.dll") && npc::initialize(scripts,log);
     return gameplay && materialize && holster && readClip && readAmmo && writeClip && available && host::connect();
 }
 Clip magazine(Ptr pc) {
@@ -309,10 +309,16 @@ bool finishEquip(Ptr pc,DWORD now) {
     return false;
 }
 void npcReleased(Ptr actor,Ptr item,Ptr ammo,Vec velocity) {
+    // DropItem can attach bonus ammunition even after the last round was fired.
+    // The engine transfers this extra to whoever next picks up the world reference.
+    Ptr extraList=item+0x44;
+    Ptr bonus=extra(extraList,0x6e); // ExtraAmmo
+    unsigned pickupRounds=field<unsigned>(bonus,0x10);
+    if (bonus) removeExtra(extraList,0x6e);
     if (ammo) call(writeClip,item,0,ammo);
     flights.push_back({id(item),id(ptr(item,0x20)),id(actor),ptr(actor,0x40),velocity,GetTickCount()});
-    log("npc_throw actor=%08x target=%08x ref=%08x base=%08x speed=%.2f",
-        id(actor),id(ptr(actor,0x128)),id(item),id(ptr(item,0x20)),velocity.length());
+    log("npc_throw actor=%08x target=%08x ref=%08x base=%08x speed=%.2f clip=0 reserve=0 pickup_rounds_removed=%u",
+        id(actor),id(ptr(actor,0x128)),id(item),id(ptr(item,0x20)),velocity.length(),pickupRounds);
 }
 bool touchingActor(Ptr actor,Ptr ref,Ptr node) {
     if (type(actor)!=0x3b && type(actor)!=0x3c) return false;
@@ -445,7 +451,7 @@ void __cdecl message(Message* msg) {
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=0.2.0 ready=%d impacts=%d npc_throws=%d",ready,hasContact!=nullptr,npcReady);
+            log("version=%s host=%s ready=%d impacts=%d npc_throws=%d",FIELD_WEAPONS_VERSION,host::version(),ready,hasContact!=nullptr,npcReady);
         }
         if (ready) frame();
     }
@@ -453,7 +459,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",6};
+    *info={1,"TTWVR Field Weapons",8};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

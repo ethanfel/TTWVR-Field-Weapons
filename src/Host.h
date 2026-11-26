@@ -5,6 +5,7 @@ namespace host {
 using Ptr = unsigned char*;
 struct Input { bool tracked, grip, keep; };
 bool connect();
+const char* version();
 Input input(int hand);
 Ptr held(int hand);
 bool pose(int hand,Vec& point,Vec& angles);

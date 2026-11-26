@@ -4,8 +4,10 @@ Pick up a loose gun or melee weapon in Fallout: New Vegas VR and use it immediat
 
 ## Install
 
-1. Set up Tale of Two Realities VR **1.1.7**, xNVSE and JIP LN NVSE. NPC throws also use kNVSE Animation Plugin.
+1. Set up Tale of Two Realities VR **1.1.8** (1.1.7 also supported), xNVSE and JIP LN NVSE. NPC throws also use kNVSE Animation Plugin.
 2. Install the [Field Weapons release ZIP](https://github.com/ethanfel/TTWVR-Field-Weapons/releases) through your mod manager, or extract it into the game’s `Data` folder. The installed file is `Data/NVSE/Plugins/TTWVRFieldWeapons.dll`.
+
+Field Weapons releases follow the TTWVR version. `1.1.8-r1` is the first release for TTWVR 1.1.8. To upgrade, replace the previous Field Weapons ZIP in your mod manager.
 
 ## Controls
 
@@ -29,7 +31,7 @@ A hard hit can also stagger the target once. Wider, taller actors resist lighter
 
 A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons.
 
-The pistol leaves the NPC’s hand during the throwing animation. You can dodge it and pick it up where it lands. A hit uses the same weight and speed rules as a player throw.
+The pistol leaves the NPC’s hand during the throwing animation. It stays empty when picked up. An NPC who finds more ammo can reload it and throw it again after firing the last round. You can dodge it and pick it up where it lands. A hit uses the same weight and speed rules as a player throw.
 
 ## Build
 

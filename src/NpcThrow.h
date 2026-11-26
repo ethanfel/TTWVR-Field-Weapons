@@ -6,7 +6,8 @@
 
 namespace npc {
 using Released = void (*)(game::Ptr actor, game::Ptr item, game::Ptr ammo, Vec velocity);
-bool initialize(Scripts* api);
+using Logger = void (*)(const char*,...);
+bool initialize(Scripts* api, Logger logger);
 void reset();
 void update(game::Ptr player, uint32_t now, Released released);
 }

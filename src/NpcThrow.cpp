@@ -9,13 +9,14 @@ namespace npc {
 using namespace game;
 namespace {
 Scripts* scripts;
+Logger trace;
 void *startAnimation, *countItem, *canSee;
 constexpr char clipName[]="1gtattackthrow6.kf";
 struct Attempt {
     unsigned actor, target, weapon, ammo;
     Ptr stack;
     uint32_t started;
-    bool waiting;
+    bool waiting, released;
 };
 std::vector<Attempt> attempts;
 uint32_t lastScan;
@@ -100,19 +101,33 @@ bool atRelease(Ptr actor) {
 void advance(Attempt& attempt,Ptr cell,Released released) {
     Ptr actor=lookup(attempt.actor),target=lookup(attempt.target),weapon=lookup(attempt.weapon);
     if (!nearOpponent(actor,target,cell) || equipped(actor)!=weapon) {
+        trace("npc_throw_cancel actor=%08x reason=combat_or_equipment",attempt.actor);
         attempt.waiting=false;
         return;
     }
     if (!atRelease(actor)) return;
     attempt.waiting=false;
     Ptr stack=stacks(actor,weapon).worn();
-    if (!stack || stack!=attempt.stack || quantity(stack)!=1 || !empty(actor,weapon) || !visible(actor,target)) return;
+    if (!stack || stack!=attempt.stack || quantity(stack)!=1) {
+        trace("npc_throw_cancel actor=%08x reason=equipped_stack_changed",attempt.actor);
+        return;
+    }
+    if (!empty(actor,weapon) || !visible(actor,target)) {
+        trace("npc_throw_cancel actor=%08x reason=ammo_or_sight",attempt.actor);
+        return;
+    }
     Ptr hand=bone(root(actor),"Bip01 R Hand");
-    if (!hand) return;
+    if (!hand) {
+        trace("npc_throw_cancel actor=%08x reason=missing_hand",attempt.actor);
+        return;
+    }
     Vec from=field<Vec>(hand,0x8c),aim=field<Vec>(target,0x30);
     if (Ptr chest=bone(root(target),"Bip01 Spine2")) aim=field<Vec>(chest,0x8c);
     else aim.z+=65.f;
-    if (!from.valid() || (from-field<Vec>(actor,0x30)).length()>180.f || !aim.valid()) return;
+    if (!from.valid() || (from-field<Vec>(actor,0x30)).length()>180.f || !aim.valid()) {
+        trace("npc_throw_cancel actor=%08x reason=invalid_pose",attempt.actor);
+        return;
+    }
     Vec delta=(aim-from)*(1.f/motion::gameUnitsPerMetre);
     const float travel=std::clamp(std::hypot(delta.x,delta.y)/6.5f,.15f,.8f);
     Vec velocity=delta*(1.f/travel);
@@ -120,14 +135,23 @@ void advance(Attempt& attempt,Ptr cell,Released released) {
     // Use the actor's DropItem virtual so its equipped instance and condition transfer together.
     using Drop=Ptr (__thiscall*)(Ptr,Ptr,Ptr,int,Vec*,Vec*);
     Ptr item=field<Drop>(ptr(actor,0),0x3cc)(actor,weapon,stack,1,&from,nullptr);
-    if (loose(item) && ptr(item,0x20)==weapon) released(actor,item,lookup(attempt.ammo),velocity);
+    if (loose(item) && ptr(item,0x20)==weapon) {
+        attempt.released=true;
+        released(actor,item,lookup(attempt.ammo),velocity);
+    } else trace("npc_throw_cancel actor=%08x reason=drop_failed",attempt.actor);
 }
 void consider(Ptr actor,Ptr cell,uint32_t now) {
     Ptr target=ptr(actor,0x128);
     if (!nearOpponent(actor,target,cell)) return;
     Ptr weapon=equipped(actor);
     if (!pistol(weapon) || !drawn(actor)) return;
-    if (std::any_of(attempts.begin(),attempts.end(),[actor](const Attempt& a){return a.actor==id(actor);})) return;
+    auto previous=std::find_if(attempts.begin(),attempts.end(),
+        [actor](const Attempt& a){return a.actor==id(actor);});
+    if (previous!=attempts.end()) {
+        // A newly loaded pistol starts a new firing sequence, even during the retry delay.
+        if (previous->released && field<int>(ammoInfo(actor),4)>0) attempts.erase(previous);
+        return;
+    }
     if (!empty(actor,weapon) || !visible(actor,target)) return;
     Ptr stack=stacks(actor,weapon).worn();
     if (!stack || quantity(stack)!=1) return;
@@ -138,10 +162,12 @@ void consider(Ptr actor,Ptr cell,uint32_t now) {
     }
     Value result;
     bool started=scripts->call(startAnimation,nullptr,nullptr,&result,1,actor) && result.type==1 && result.number>0;
-    attempts.push_back({id(actor),id(target),id(weapon),id(ammo),stack,now,started});
+    trace("npc_throw_animation actor=%08x base=%08x started=%d",id(actor),id(weapon),started);
+    attempts.push_back({id(actor),id(target),id(weapon),id(ammo),stack,now,started,false});
 }
 }
-bool initialize(Scripts* api) {
+bool initialize(Scripts* api,Logger logger) {
+    trace=logger;
     scripts=api;
     startAnimation=api->compile(R"(ref who
 begin Function {who}
@@ -164,7 +190,10 @@ void update(Ptr pc,uint32_t now,Released released) {
     Ptr cell=ptr(pc,0x40);
     if (currentCell!=cell) { reset(); currentCell=cell; }
     for (auto& attempt:attempts) {
-        if (now-attempt.started>2200u) attempt.waiting=false;
+        if (attempt.waiting && now-attempt.started>2200u) {
+            trace("npc_throw_cancel actor=%08x reason=release_key_timeout",attempt.actor);
+            attempt.waiting=false;
+        }
         if (attempt.waiting) advance(attempt,cell,released);
     }
     if (now-lastScan<150u) return;
