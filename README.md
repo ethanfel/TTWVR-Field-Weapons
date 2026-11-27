@@ -31,7 +31,7 @@ A hard hit can also stagger the target once. Wider, taller actors resist lighter
 
 In `Data/NVSE/Plugins/TTWVRFieldWeapons.ini`, set `ThrowableWeapons=1` under `[Holsters]` and restart the game. The default is `0`.
 
-Draw a weapon from a numbered body holster and keep grip held. Release grip to drop or throw it. Pick it up again, hold **A** (right) or **X** (left) for one second, then release grip while holding the button to store it. The original slot is remembered. TTWVR can fill it with an identical spare while the weapon is on the ground. If you assign a different item, it keeps the slot.
+Draw a weapon from a numbered body holster and keep grip held. Release grip to drop or throw it. Pick it up again, hold **A** (right) or **X** (left) for one second, then release grip while holding the button to store it. On the ground, your holstered copy has **[Yours]** after its name. The original slot is remembered. TTWVR can fill it with an identical spare while the weapon is on the ground. If you assign a different item, it keeps the slot.
 
 ## NPC combat
 

@@ -10,6 +10,7 @@
 #include "NpcThrow.h"
 #include <cstdio>
 #include <cstdarg>
+#include <cmath>
 
 namespace {
 using namespace game;
@@ -22,11 +23,18 @@ ReadRef readRef;
 void *hasContact;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*fundedClip,*writeClip,*available;
 void *addAmmo,*removeAmmo,*readSlot,*writeSlot,*keyOwner,*selectAmmo;
+void *readAction,*writeAction,*ownedLabel;
+unsigned lastFocus;
 bool extended;
 constexpr DWORD keepHoldMs=1000;
 bool initialized,ready,loaded,npcReady;
 unsigned gated, reported{};
-struct Clip { Ptr ammo{}; int rounds{}; };
+struct Clip {
+    Ptr ammo{};
+    int rounds{};
+    host::ReloadState action{};
+    bool hasAction{};
+};
 struct Equipment { Ptr form{},stack{}; bool out{}; int hand{}; Clip clip; unsigned healthBits{}; bool plain{}; };
 struct Loan {
     Ptr base{}, stack{},cell{};
@@ -100,6 +108,24 @@ begin Function {item rounds ammo}
  item.AuxVarSetRef "_TTWVRFieldMagazine" ammo 1
  item.AuxVarSetFlt "_TTWVRFieldMagazine" 1 2
 end)");
+    // Each world reference owns its reload snapshot. Store unsigned words as
+    // exact doubles in JIP; split the input because xNVSE script ints are signed.
+    readAction=scripts->compile(R"(ref item
+int word
+begin Function {item word}
+ if eval (item.AuxVarSize "_TTWVRFieldAction") == 13
+  SetFunctionValue (item.AuxVarGetFlt "_TTWVRFieldAction" word)
+ else
+  SetFunctionValue -1
+ endif
+end)");
+    writeAction=scripts->compile(R"(ref item
+int word
+int lo
+int hi
+begin Function {item word lo hi}
+ item.AuxVarSetFlt "_TTWVRFieldAction" (lo + (hi * 65536.0)) word
+end)");
     available=scripts->compile("ref ammo\nbegin Function {ammo}\n SetFunctionValue (player.GetItemCount ammo)\nend");
     // JIP exposes the actor controller and the loose rigid body's contact lists separately.
     hasContact=scripts->compile("ref item\nref actorRef\nbegin Function {item actorRef}\n SetFunctionValue (eval (item.GetHasContact actorRef) || (actorRef.GetHasContact item))\nend");
@@ -116,6 +142,15 @@ end)");
         readSlot=scripts->compile("ref item\nbegin Function {item}\n SetFunctionValue (item.AuxVarGetFlt \"_TTWVRFieldSlot\")\nend");
         writeSlot=scripts->compile("ref item\nint slot\nbegin Function {item slot}\n item.AuxVarSetFlt \"_TTWVRFieldSlot\" slot\nend");
         keyOwner=scripts->compile("int slot\nbegin Function {slot}\n SetFunctionValue (GetHotkeyItemRef slot)\nend");
+        ownedLabel=scripts->compile(R"(ref item
+string_var displayName
+begin Function {item}
+ let displayName := item.LNGetName
+ if eval (sv_Length displayName) <= 119 && (sv_Find " [Yours]" displayName) == -1
+  item.SetRefName (sv_Construct "%z [Yours]" displayName)
+ endif
+ sv_Destruct displayName
+end)");
         extended=readSlot && writeSlot && keyOwner && host::observeHolsters();
     }
     return true;
@@ -124,13 +159,44 @@ Clip magazine(Ptr pc) {
     Ptr info=ammoInfo(pc);
     return {ptr(info,8),field<int>(info,4)};
 }
-void setMagazine(Ptr pc,Clip clip) {
+Clip physicalMagazine(Ptr pc,Ptr weapon) {
+    Clip clip=magazine(pc);
+    clip.hasAction=clip.ammo && host::readReload(weapon,clip.action) && clip.action.live>=0;
+    if (clip.hasAction) clip.rounds=clip.action.live;
+    return clip;
+}
+void readWorldAction(Ptr ref,Clip& clip) {
+    if (!clip.ammo || !readAction) return;
+    unsigned words[13];
+    for (int i=0;i<13;++i) {
+        Value word=call(readAction,ref,i);
+        if (word.type!=1 || !std::isfinite(word.number) || word.number<0 || word.number>4294967295.) return;
+        words[i]=static_cast<unsigned>(word.number);
+    }
+    std::memcpy(static_cast<void*>(&clip.action),words,sizeof words);
+    const auto& s=clip.action;
+    clip.hasAction=s.live==clip.rounds && s.magazine<=1 && s.chamber<=1 &&
+        s.magazineRounds>=0 && s.magazineRounds<=s.live && s.spent>=0 && s.spent<=65535 &&
+        std::isfinite(s.action) && s.action>=0 && s.action<=1 && s.chamberIndex>=0 && s.chamberIndex<16 &&
+        std::all_of(s.chambers,s.chambers+16,[](unsigned char value){return value<=2;});
+}
+void setMagazine(Ptr pc,Clip clip,Ptr weapon=nullptr) {
     Ptr info=ammoInfo(pc);
     if (!clip.ammo || ptr(info,8)!=clip.ammo || clip.rounds<0) return;
     Value count=call(available,clip.ammo);
     if (count.type!=1) return;
     int rounds=std::clamp(clip.rounds,0,std::max(0,int(count.number)));
     std::memcpy(info+4,&rounds,sizeof rounds);
+    if (!weapon) return;
+    host::ReloadState action{};
+    if (clip.hasAction && clip.action.live==rounds) action=clip.action;
+    else {
+        action.live=rounds;
+        action.chamber=rounds>0;
+        action.magazineRounds=std::max(0,rounds-1);
+        std::fill_n(action.chambers,std::min(rounds,16),1);
+    }
+    if (host::rememberReload(weapon,clip.ammo,action)) host::applyReload(pc,weapon);
 }
 int inventory(Ptr ammo) {
     Value v=call(available,ammo);
@@ -161,11 +227,16 @@ void storeMagazine(Ptr dropped,Clip clip,int before) {
     int moved=std::clamp(before-(finalCount<0 ? after : finalCount),0,wanted);
     std::memcpy(node+0x10,&moved,4);
     call(writeClip,dropped,moved,clip.ammo);
+    if (writeAction && clip.hasAction && moved==clip.action.live) {
+        unsigned words[13];
+        std::memcpy(words,&clip.action,sizeof words);
+        for (int i=0;i<13;++i) call(writeAction,dropped,i,int(words[i]&65535),int(words[i]>>16));
+    }
     log("ammo_drop ref=%08x ammo=%08x rounds=%d carried=%d",id(dropped),id(clip.ammo),moved,finalCount);
 }
 Equipment equipment(Ptr pc) {
     Ptr form=equipped(pc);
-    Equipment old={form,form ? stacks(pc,form).worn() : nullptr,drawn(pc),host::drawHand(),magazine(pc)};
+    Equipment old={form,form ? stacks(pc,form).worn() : nullptr,drawn(pc),host::drawHand(),physicalMagazine(pc,form)};
     old.plain=plainCondition(old.stack,old.healthBits);
     return old;
 }
@@ -187,7 +258,7 @@ void finishRestore(Ptr pc,DWORD now) {
     }
     restoring={};
     if (old.out) host::draw(old.hand,old.form); else call(holster);
-    setMagazine(pc,old.clip);
+    setMagazine(pc,old.clip,old.form);
 }
 void restore(Ptr pc,const Equipment& old) {
     restoring={};
@@ -273,6 +344,7 @@ void borrow(Ptr pc,Ptr ref,int hand,const Equipment& previous) {
         }
         if (!clip.ammo) clip.ammo=defaultAmmo(form);
     }
+    readWorldAction(ref,clip);
     int carried=clip.ammo ? inventory(clip.ammo) : -1;
     if (!host::take(hand)) {
         if (sameEquipped) restore(pc,previous);
@@ -337,14 +409,21 @@ void finishPickup(Ptr pc,DWORD now) {
     borrow(pc,ref,pending.hand,pending.previous);
 }
 void cancel(const char* reason) { log("end base=%08x reason=%s",id(loan.base),reason); loan={}; }
+void markHolsterDrop(Ptr ref,int slot) {
+    if (!slot) return;
+    call(writeSlot,ref,slot);
+    if (ownedLabel) call(ownedLabel,ref);
+}
 void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     auto items=stacks(pc,loan.base);
     if (!items.contains(loan.stack) || quantity(loan.stack)!=1) { cancel("instance no longer available"); return; }
     const Equipment previous=loan.before;
     const bool ours=equipped(pc)==loan.base && items.worn()==loan.stack;
-    Clip clip=ours ? magazine(pc) : loan.clip;
+    Clip clip=ours ? physicalMagazine(pc,loan.base) : loan.clip;
     if (!supportsAmmo(loan.base,clip.ammo)) clip={defaultAmmo(loan.base),0};
     int carried=clip.ammo ? inventory(clip.ammo) : -1;
+    if (ours && clip.hasAction && magazine(pc).rounds!=clip.rounds)
+        log("ammo_release_mismatch base=%08x engine=%d physical=%d",id(loan.base),magazine(pc).rounds,clip.rounds);
     int slot=loan.slot, hand=loan.hand;
     Ptr form=loan.base, stack=loan.stack;
     // Fallout otherwise gives this hotkey to another owned copy during DropItem.
@@ -355,7 +434,7 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     loan={};
     if (dropped && loose(dropped) && id(ptr(dropped,0x20))==base) {
         if (extra(dropped+0x44,0x4a)) removeExtra(dropped+0x44,0x4a);
-        if (slot) call(writeSlot,dropped,slot);
+        markHolsterDrop(dropped,slot);
         storeMagazine(dropped,clip,carried);
         flights.push_back({id(dropped),base,id(pc),ptr(pc,0x40),velocity,now});
         log("release ref=%08x base=%08x speed=%.2f clip=%d velocity_mps=%.2f,%.2f,%.2f hand=%d slot=%d",
@@ -384,7 +463,7 @@ bool finishEquip(Ptr pc,DWORD now) {
                 load.rounds=std::min(load.rounds,capacity(loan.base,worn));
                 if (magazine(pc).ammo!=load.ammo && load.rounds>0) call(selectAmmo,load.ammo);
                 if (!load.rounds) load.ammo=magazine(pc).ammo;
-                setMagazine(pc,load);
+                setMagazine(pc,load,loan.base);
             }
             loan.clip=magazine(pc);
             loan.equipping=false; loan.protectedStacks={};
@@ -401,7 +480,7 @@ bool finishEquip(Ptr pc,DWORD now) {
         int before=clip.ammo ? inventory(clip.ammo) : -1;
         Ptr dropped=drop(pc,loan.base,loan.stack,located?&point:nullptr,&loan.angles);
         if (loose(dropped)) {
-            if (loan.slot) call(writeSlot,dropped,loan.slot);
+            markHolsterDrop(dropped,loan.slot);
             storeMagazine(dropped,clip,before);
         }
     }
@@ -510,7 +589,7 @@ void followHolster(Ptr pc,DWORD now) {
     host::forgetHolsters();
     loan={};
     loan.base=form; loan.stack=worn; loan.hand=hand; loan.slot=slot; loan.nativeHolster=true;
-    loan.cell=ptr(pc,0x40); loan.clip=magazine(pc); loan.armedKeep=!input.keep;
+    loan.cell=ptr(pc,0x40); loan.clip=physicalMagazine(pc,form); loan.armedKeep=!input.keep;
     loan.equipSince=now;
     log("holster_draw base=%08x hand=%d slot=%d",id(form),hand,slot);
 }
@@ -523,6 +602,18 @@ void frame() {
     DWORD now=GetTickCount();
     flights.erase(std::remove_if(flights.begin(),flights.end(),
         [pc,now](Flight& flight){return finishFlight(flight,pc,now);}),flights.end());
+    // JIP display names are session-local. Reapply the persistent slot marker on focus after loading.
+    if (extended && ownedLabel) {
+        Ptr ui=*reinterpret_cast<Ptr*>(0x11d8a80);
+        Ptr target=ptr(ui,0xfc);
+        if (id(target)!=lastFocus) {
+            lastFocus=id(target);
+            if (eligible(target)) {
+                auto slot=call(readSlot,target);
+                if (slot.type==1 && slot.number>=1 && slot.number<=8) call(ownedLabel,target);
+            }
+        }
+    }
     if (npcReady) npc::update(pc,now,npcReleased);
     finishRestore(pc,now);
     if (pendingTake.reference) { finishPickup(pc,now); return; }
@@ -539,7 +630,7 @@ void frame() {
         Vec point{},angles{},origin=field<Vec>(pc,0x30);
         bool validPoint=host::pose(h,point,angles) && (point-origin).length()<220;
         if (validPoint) loan.angles=angles;
-        if (equipped(pc)==loan.base) loan.clip=magazine(pc);
+        if (equipped(pc)==loan.base) loan.clip=physicalMagazine(pc,loan.base);
         Vec velocity{};
         if (validPoint) velocity=loan.motion.step(point,origin,now);
         else loan.motion.clear();
@@ -583,7 +674,7 @@ void frame() {
 void __cdecl message(Message* msg) {
     switch (msg->type) {
     case 1: case 2: case 6: case 7: case 8: case 14:
-        host::forgetHolsters(); npc::reset(); loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; gated=3;
+        host::forgetHolsters(); npc::reset(); loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; lastFocus=0; gated=3;
         loaded=msg->type==14 || (msg->type==8 && msg->data); return;
     case 20:
         if (!loaded) return;
@@ -597,7 +688,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",10};
+    *info={1,"TTWVR Field Weapons",11};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

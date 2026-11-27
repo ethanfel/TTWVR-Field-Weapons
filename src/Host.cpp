@@ -29,6 +29,10 @@ constexpr Layout layouts[] = {
 };
 Ptr base;
 const Layout* layout;
+bool reloadCache;
+bool reloadActive(Ptr gun) {
+    return reloadCache && base[0x1c11f3d] && *reinterpret_cast<Ptr*>(base+0x1c11fa4)==gun;
+}
 
 // Observe only TTWVR's physical slot action. Wheel, keyboard and inventory equips
 // never enter this call. The game thread checks which exact stack was drawn.
@@ -108,10 +112,39 @@ bool connect() {
             nt->OptionalHeader.SizeOfImage!=candidate.imageSize || !matches(candidate)) continue;
         bool xr=Reader<0>::attach(candidate.xrTable);
         bool vr=Reader<1>::attach(candidate.vrTable);
-        if (xr || vr) layout=&candidate;
+        if (xr || vr) {
+            layout=&candidate;
+            // Older hosts use Fallout's equipped clip. 1.1.8 also restores a
+            // per-slot reload record, including live/spent shells and the action.
+            const unsigned char capture[]{0x83,0xec,0x34,0x80,0x3d};
+            const unsigned char remember[]{0x56,0xff,0x74,0x24,0x10,0xe8};
+            const unsigned char restore[]{0x83,0xec,0x38,0x83,0x3d};
+            const unsigned char slot[]{0x83,0xec,0x1c,0xa1};
+            reloadCache=candidate.timestamp==0x6b07a53e &&
+                !std::memcmp(base+0x3a9ad0,capture,sizeof capture) &&
+                !std::memcmp(base+0x3b8f30,remember,sizeof remember) &&
+                !std::memcmp(base+0x39a9a0,restore,sizeof restore) &&
+                !std::memcmp(base+0x23a000,slot,sizeof slot);
+        }
         break;
     }
     return layout!=nullptr;
+}
+bool readReload(Ptr gun,ReloadState& state) {
+    using Fn=bool (__cdecl*)(ReloadState*);
+    return reloadActive(gun) && reinterpret_cast<Fn>(base+0x3a9ad0)(&state);
+}
+bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state) {
+    if (!reloadCache || !gun || !ammo) return false;
+    using Slot=int (__cdecl*)(Ptr);
+    using Remember=void (__cdecl*)(Ptr,int,Ptr,const ReloadState*);
+    int slot=reinterpret_cast<Slot>(base+0x23a000)(gun);
+    reinterpret_cast<Remember>(base+0x3b8f30)(gun,slot,ammo,&state);
+    return true;
+}
+void applyReload(Ptr player,Ptr gun) {
+    using Apply=void (__cdecl*)(Ptr);
+    if (reloadActive(gun)) reinterpret_cast<Apply>(base+0x39a9a0)(player);
 }
 bool observeHolsters() {
     if (!layout) return false;

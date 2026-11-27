@@ -1,0 +1,46 @@
+ref cell
+ref raider
+ref bench
+ref pistol
+ref shotgun
+int count
+ref testGun
+ref testRaiderBase
+let cell := player.GetParentCell
+let testRaiderBase := GetFormFromMod "Fallout3.esm" "023597"
+let testGun := GetFormFromMod "FWThreeRoundsTest.esp" "800"
+let raider := StringToRef ":002d76"
+if eval testGun && (IsFormValid raider) && (raider.GetBaseObject == testRaiderBase) && (raider.GetParentCell == cell) && (cell == GetFormFromMod "Fallout3.esm" "017F3A")
+ if eval IsFormValid (player.AuxVarGetRef "_FWTestBench")
+  PrintToConsole "The Field Weapons practice bench is already here."
+  return
+ endif
+ raider.StopCombat
+ raider.Disable
+ player.StopCombat
+ player.HolsterWeapon
+ player.SetPosEx -3373 -2941 290
+ player.SetAngle Z 0
+ let bench := PlaceAtCell 000F21B3 1 cell -3373 -2888 310
+ player.AuxVarSetRef "_FWTestBench" bench
+ let pistol := PlaceAtCell 0000434F 1 cell -3392 -2910 375
+ pistol.AuxVarSetFlt "_TTWVRFieldMagazine" 8
+ pistol.AuxVarSetRef "_TTWVRFieldMagazine" 00004241 1
+ pistol.AuxVarSetFlt "_TTWVRFieldMagazine" 1 2
+ let shotgun := PlaceAtCell 001735E3 1 cell -3355 -2910 375
+ shotgun.AuxVarSetFlt "_TTWVRFieldMagazine" 0
+ shotgun.AuxVarSetRef "_TTWVRFieldMagazine" 000E86F2 1
+ shotgun.AuxVarSetFlt "_TTWVRFieldMagazine" 1 2
+ let count := player.GetItemCount 00004241
+ if count
+  player.RemoveItem 00004241 count 1
+ endif
+ let count := player.GetItemCount 000E86F2
+ if count < 30
+  let count := 30 - count
+  player.AddItem 000E86F2 count 1
+ endif
+ PrintToConsole "Field Weapons bench ready. Left: eight-round 10mm. Right: empty shotgun."
+else
+ PrintToConsole "Load the original Field Weapons - Reload and Throw test save first."
+endif
