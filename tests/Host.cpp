@@ -55,6 +55,18 @@ void testPouch(host::Ptr base,bool current) {
 }
 
 int wmain(int argc,wchar_t** argv) {
+    host::ReloadState saved{};
+    saved.magazine=0;
+    for (int chamber : {0,1}) {
+        saved.chamber=chamber;
+        for (int rounds : {0,1,7}) {
+            saved.live=rounds; saved.magazine=0; saved.magazineRounds=0;
+            assert(saved.reconcileMagazine()==(rounds>1));
+            assert(saved.live==rounds && saved.chamber==chamber);
+            assert(saved.magazineRounds==(rounds>1 ? rounds-chamber : 0));
+            assert(!saved.reconcileMagazine());
+        }
+    }
     if (argc!=2) return 2;
     auto base=reinterpret_cast<host::Ptr>(LoadLibraryW(argv[1]));
     if (!base) { std::printf("LoadLibrary failed: %lu\n",GetLastError()); return 3; }
@@ -86,6 +98,16 @@ int wmain(int argc,wchar_t** argv) {
     assert(host::observeHolsters() && host::observeHolsters());
     std::memcpy(&target,actionCall+1,4);
     assert(target!=originalTarget);
+    auto exactSlot=[](host::Ptr gun) { return gun[0] ? 6 : -1; };
+    assert(host::observeReloadSlots(exactSlot)==current);
+    if (current) {
+        auto site=base+0x3b8c0d;
+        int disp;
+        std::memcpy(&disp,site+1,4);
+        auto resolve=reinterpret_cast<int (__cdecl*)(host::Ptr)>(site+5+disp);
+        unsigned char field=0,holstered=1;
+        assert(resolve(&field)==-1 && resolve(&holstered)==6);
+    }
     testPouch(base,current);
     for (auto slot : slots) {
         assert(*slot!=prior);

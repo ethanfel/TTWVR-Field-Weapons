@@ -38,7 +38,7 @@ Edit `[Holsters]` in `Data/NVSE/Plugins/TTWVRFieldWeapons.ini` and restart the g
 | `PhysicalHolstering` | `0` | Release grip inside an enabled numbered holster. A field pickup takes that slot and the previous item stays in inventory. Return a personal weapon to its original slot. |
 | `ReturnOwnedAtAnySlot` | `0` | With physical holstering on, releasing an owned weapon at any enabled holster sends it back to its original slot. The touched slot keeps its assignment. |
 
-If you assigned a different item to the original slot while your weapon was on the ground, returning the weapon keeps it in inventory and preserves the new assignment.
+If a field pickup takes the slot of a weapon you dropped, the dropped weapon loses its **[Yours]** label. You can pick it up again and assign it to another holster, even if the replacement is the same model.
 
 ## NPC combat
 

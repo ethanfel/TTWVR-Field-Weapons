@@ -31,6 +31,12 @@ constexpr Layout layouts[] = {
 Ptr base;
 const Layout* layout;
 bool reloadCache;
+using WeaponSlot=int (__cdecl*)(Ptr);
+int (*wornReloadSlot)(Ptr);
+int __cdecl reloadSlot(Ptr gun) {
+    int exact=wornReloadSlot ? wornReloadSlot(gun) : -2;
+    return exact>=-1 ? exact : reinterpret_cast<WeaponSlot>(base+0x23a000)(gun);
+}
 bool reloadActive(Ptr gun) {
     return reloadCache && base[0x1c11f3d] && *reinterpret_cast<Ptr*>(base+0x1c11fa4)==gun;
 }
@@ -135,17 +141,43 @@ bool readReload(Ptr gun,ReloadState& state) {
     using Fn=bool (__cdecl*)(ReloadState*);
     return reloadActive(gun) && reinterpret_cast<Fn>(base+0x3a9ad0)(&state);
 }
+bool observeReloadSlots(int (*slotForWornCopy)(Ptr)) {
+    if (!reloadCache || !slotForWornCopy) return false;
+    if (wornReloadSlot) return true;
+    // TTWVR saves its active magazine under the first matching base form's
+    // holster. Use the equipped instance's key when Field Weapons handles a copy.
+    Ptr site=base+0x3b8c0d, thunk=base+0x2f63a;
+    int rel,tail;
+    std::memcpy(&rel,site+1,4);
+    std::memcpy(&tail,thunk+1,4);
+    Ptr currentKey;
+    std::memcpy(&currentKey,site+10,4);
+    if (site[0]!=0xe8 || site+5+rel!=thunk || thunk[0]!=0xe9 ||
+        thunk+5+tail!=base+0x23a000 || site[9]!=0xa3 || currentKey!=base+0x124c05c) return false;
+    DWORD old,ignored;
+    if (!VirtualProtect(site,5,PAGE_EXECUTE_READWRITE,&old)) return false;
+    wornReloadSlot=slotForWornCopy;
+    auto disp=DWORD(reinterpret_cast<uintptr_t>(reloadSlot)-reinterpret_cast<uintptr_t>(site+5));
+    std::memcpy(site+1,&disp,4);
+    FlushInstructionCache(GetCurrentProcess(),site,5);
+    VirtualProtect(site,5,old,&ignored);
+    return true;
+}
 bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot) {
     if (!reloadCache || !gun || !ammo) return false;
-    using Slot=int (__cdecl*)(Ptr);
     using Remember=void (__cdecl*)(Ptr,int,Ptr,const ReloadState*);
-    int slot=numberedSlot>=1 && numberedSlot<=8 ? numberedSlot-1 : reinterpret_cast<Slot>(base+0x23a000)(gun);
+    int slot=numberedSlot>=1 && numberedSlot<=8 ? numberedSlot-1 : reloadSlot(gun);
     reinterpret_cast<Remember>(base+0x3b8f30)(gun,slot,ammo,&state);
     return true;
 }
 void applyReload(Ptr player,Ptr gun) {
     using Apply=void (__cdecl*)(Ptr);
-    if (reloadActive(gun)) reinterpret_cast<Apply>(base+0x39a9a0)(player);
+    if (!reloadActive(gun)) return;
+    if (wornReloadSlot) {
+        int exact=wornReloadSlot(gun);
+        if (exact>=-1) std::memcpy(base+0x124c05c,&exact,sizeof exact);
+    }
+    reinterpret_cast<Apply>(base+0x39a9a0)(player);
 }
 bool observeHolsters() {
     if (!layout) return false;
