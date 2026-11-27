@@ -345,7 +345,7 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     Clip clip=ours ? magazine(pc) : loan.clip;
     if (!supportsAmmo(loan.base,clip.ammo)) clip={defaultAmmo(loan.base),0};
     int carried=clip.ammo ? inventory(clip.ammo) : -1;
-    int slot=loan.slot;
+    int slot=loan.slot, hand=loan.hand;
     Ptr form=loan.base, stack=loan.stack;
     // Fallout otherwise gives this hotkey to another owned copy during DropItem.
     bool unbound=slot && hotkey(stack)==slot;
@@ -358,8 +358,8 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
         if (slot) call(writeSlot,dropped,slot);
         storeMagazine(dropped,clip,carried);
         flights.push_back({id(dropped),base,id(pc),ptr(pc,0x40),velocity,now});
-        log("release ref=%08x base=%08x speed=%.2f clip=%d velocity_mps=%.2f,%.2f,%.2f",
-            id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1,velocity.x,velocity.y,velocity.z);
+        log("release ref=%08x base=%08x speed=%.2f clip=%d velocity_mps=%.2f,%.2f,%.2f hand=%d slot=%d",
+            id(dropped),base,velocity.length(),clip.ammo?clip.rounds:-1,velocity.x,velocity.y,velocity.z,hand,slot);
     } else {
         if (unbound) restoreSlot(pc,form,stack,slot);
         log("native drop returned no loose weapon base=%08x",base);
@@ -485,13 +485,25 @@ bool finishFlight(Flight& flight, Ptr pc, DWORD now) {
 }
 void followHolster(Ptr pc,DWORD now) {
     if (!extended || !drawn(pc)) return;
-    int hand=host::drawHand(), slot=host::recentHolster(hand);
-    if (!slot) return;
-    auto input=host::input(hand);
+    int slots[2]={host::recentHolster(0),host::recentHolster(1)};
+    if (!slots[0] && !slots[1]) return;
     Ptr form=equipped(pc);
-    if (!input.tracked || !input.grip || !eligibleForm(form) || host::held(hand)) return;
+    if (!eligibleForm(form)) return;
     Ptr worn=stacks(pc,form).worn();
-    if (!worn || hotkey(worn)!=slot) return;
+    int slot=hotkey(worn);
+    if (!slot) return;
+    // The host can leave the primary draw-hand override unset after a native draw.
+    // The accepted holster action identifies the controller that actually drew it.
+    int hand=-1;
+    for (int h=0;h<2;++h) {
+        if (slots[h]!=slot || host::held(h)) continue;
+        auto grip=host::input(h);
+        if (!grip.tracked || !grip.grip) continue;
+        if (hand>=0) return;
+        hand=h;
+    }
+    if (hand<0) return;
+    auto input=host::input(hand);
     Value mode=call(gameplay);
     if (mode.type!=1 || !mode.number) return;
     if (quantity(worn)!=1 && !splitOne(itemEntry(pc,form),worn,true)) return;
@@ -585,7 +597,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",9};
+    *info={1,"TTWVR Field Weapons",10};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
