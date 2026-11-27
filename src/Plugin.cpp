@@ -225,9 +225,19 @@ Clip magazine(Ptr pc) {
     Ptr info=ammoInfo(pc);
     return {ptr(info,8),field<int>(info,4)};
 }
-Clip physicalMagazine(Ptr pc,Ptr weapon) {
+Ptr defaultAmmo(Ptr weapon) {
+    if (field<unsigned char>(weapon,0xf4)<3) return nullptr;
+    Ptr a=ptr(weapon,0xa8);
+    if (type(a)==0x55) a=ptr(a,0x18);
+    return type(a)==0x29 ? a : nullptr;
+}
+Clip physicalMagazine(Ptr pc,Ptr weapon,Ptr knownAmmo=nullptr) {
     Clip clip=magazine(pc);
-    clip.hasAction=clip.ammo && host::readReload(weapon,clip.action) && clip.action.live>=0;
+    clip.hasAction=host::readReload(weapon,clip.action) && clip.action.live>=0;
+    // Fallout can clear its ammo type when the final round leaves inventory.
+    // An active, empty reload mechanism still has a state worth storing.
+    if (!clip.ammo && clip.hasAction && !clip.action.live)
+        clip.ammo=knownAmmo ? knownAmmo : defaultAmmo(weapon);
     if (clip.hasAction) clip.rounds=clip.action.live;
     return clip;
 }
@@ -248,11 +258,12 @@ void readWorldAction(Ptr ref,Clip& clip) {
 }
 void setMagazine(Ptr pc,Clip clip,Ptr weapon=nullptr) {
     Ptr info=ammoInfo(pc);
-    if (!clip.ammo || ptr(info,8)!=clip.ammo || clip.rounds<0) return;
+    Ptr activeAmmo=ptr(info,8);
+    if (!clip.ammo || clip.rounds<0 || (activeAmmo!=clip.ammo && (activeAmmo || clip.rounds))) return;
     Value count=call(available,clip.ammo);
     if (count.type!=1) return;
     int rounds=std::clamp(clip.rounds,0,std::max(0,int(count.number)));
-    std::memcpy(info+4,&rounds,sizeof rounds);
+    if (info) std::memcpy(info+4,&rounds,sizeof rounds);
     if (!weapon) return;
     host::ReloadState action{};
     if (clip.hasAction && clip.action.live==rounds) action=clip.action;
@@ -269,12 +280,6 @@ void setMagazine(Ptr pc,Clip clip,Ptr weapon=nullptr) {
 int inventory(Ptr ammo) {
     Value v=call(available,ammo);
     return v.type==1 ? std::max(0,int(v.number)) : -1;
-}
-Ptr defaultAmmo(Ptr weapon) {
-    if (field<unsigned char>(weapon,0xf4)<3) return nullptr;
-    Ptr a=ptr(weapon,0xa8);
-    if (type(a)==0x55) a=ptr(a,0x18);
-    return type(a)==0x29 ? a : nullptr;
 }
 void restoreSlot(Ptr pc,Ptr form,Ptr stack,int slot) {
     if (!keyOwner || slot<1 || slot>8 || !stacks(pc,form).contains(stack) || hotkey(stack)) return;
@@ -297,6 +302,7 @@ void storeMagazine(Ptr dropped,Clip clip,int before) {
     call(writeClip,dropped,moved,clip.ammo);
     if (writeAction && clip.hasAction && moved==clip.action.live) {
         clip.action.reconcileMagazine();
+        std::fill_n(clip.action.padding,3,0);
         unsigned words[13];
         std::memcpy(words,&clip.action,sizeof words);
         for (int i=0;i<13;++i) call(writeAction,dropped,i,int(words[i]&65535),int(words[i]>>16));
@@ -514,7 +520,7 @@ bool storeAtHolster(Ptr pc,int touched) {
         equipped(pc)!=loan.base) return false;
     if (loan.slot && touched!=loan.slot && !anyOwnedSlot) return false;
     int slot=loan.slot ? loan.slot : touched;
-    Clip clip=physicalMagazine(pc,loan.base);
+    Clip clip=physicalMagazine(pc,loan.base,loan.clip.ammo);
     if (hotkey(loan.stack)!=slot) {
         Value owner;
         if (!scripts->call(keyOwner,nullptr,nullptr,&owner,1,slot)) return false;
@@ -557,7 +563,7 @@ void release(Ptr pc,Vec* point,Vec velocity,DWORD now) {
     if (!items.contains(loan.stack) || quantity(loan.stack)!=1) { cancel("instance no longer available"); return; }
     const Equipment previous=loan.before;
     const bool ours=equipped(pc)==loan.base && items.worn()==loan.stack;
-    Clip clip=ours ? physicalMagazine(pc,loan.base) : loan.clip;
+    Clip clip=ours ? physicalMagazine(pc,loan.base,loan.clip.ammo) : loan.clip;
     if (!supportsAmmo(loan.base,clip.ammo)) clip={defaultAmmo(loan.base),0};
     int carried=clip.ammo ? inventory(clip.ammo) : -1;
     if (ours && clip.hasAction && magazine(pc).rounds!=clip.rounds)
@@ -600,10 +606,11 @@ bool finishEquip(Ptr pc,DWORD now) {
             if (load.ammo) {
                 load.rounds=std::min(load.rounds,capacity(loan.base,worn));
                 if (magazine(pc).ammo!=load.ammo && load.rounds>0) call(selectAmmo,load.ammo);
-                if (!load.rounds) load.ammo=magazine(pc).ammo;
+                Ptr activeAmmo=magazine(pc).ammo;
+                if (!load.rounds && supportsAmmo(loan.base,activeAmmo)) load.ammo=activeAmmo;
                 setMagazine(pc,load,loan.base);
             }
-            loan.clip=magazine(pc);
+            loan.clip=load;
             loan.equipping=false; loan.protectedStacks={};
             log("borrow source=%08x base=%08x hand=%d previous=%08x",loan.source,id(loan.base),loan.hand,id(loan.before.form));
             return true;
@@ -785,7 +792,7 @@ void frame() {
         Vec point{},angles{},origin=field<Vec>(pc,0x30);
         bool validPoint=host::pose(h,point,angles) && (point-origin).length()<220;
         if (validPoint) loan.angles=angles;
-        if (equipped(pc)==loan.base) loan.clip=physicalMagazine(pc,loan.base);
+        if (equipped(pc)==loan.base) loan.clip=physicalMagazine(pc,loan.base,loan.clip.ammo);
         Vec velocity{};
         if (validPoint) velocity=loan.motion.step(point,origin,now);
         else loan.motion.clear();
@@ -796,7 +803,11 @@ void frame() {
                 Value owner=call(keyOwner,loan.slot);
                 if (owner.type==2 && owner.object && ptr(owner.object,0x20)!=loan.base) loan.slot=0;
             }
-            if (physicalStore && validPoint && storeAtHolster(pc,host::holsterAt(pc,h))) return;
+            if (physicalStore) {
+                int touched=host::holsterAt(pc,h);
+                if (storeAtHolster(pc,touched)) return;
+                log("holster_miss hand=%d home=%d touched=%d pose=%d",h,loan.slot,touched,validPoint);
+            }
             if (holdToKeep && loan.holdingKeep && input.keep && now-loan.keepSince>=keepHoldMs) {
                 if (loan.slot) { restoreSlot(pc,loan.base,loan.stack,loan.slot); call(holster); }
                 cancel("kept");
@@ -854,7 +865,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",14};
+    *info={1,"TTWVR Field Weapons",15};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
