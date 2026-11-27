@@ -27,22 +27,23 @@ A thrown weapon damages the first NPC or creature it physically hits. Heavier we
 
 A hard hit can also stagger the target once. Wider, taller actors resist lighter throws. For example, a thrown pistol can stagger a raider while a super mutant takes a heavier or faster throw. The target plays a brief hit animation if its skeleton has a compatible one.
 
-## Holster settings
+## INI settings
 
-Edit `[Holsters]` in `Data/NVSE/Plugins/TTWVRFieldWeapons.ini` and restart the game.
+Edit `Data/NVSE/Plugins/TTWVRFieldWeapons.ini` and restart the game. Set an option to `1` to turn it on or `0` to turn it off. With the defaults, you can throw weapons you pick up in the world. Weapons drawn from your holsters use the usual TTWVR controls.
 
-| Setting | Default | Behavior when enabled |
-| --- | --- | --- |
-| `HoldToKeep` | `1` | Hold A/X for one second and release grip to keep the weapon. Set to `0` to use A/X exclusively for TTWVR controls such as ejecting a magazine. |
-| `ThrowableWeapons` | `0` | Draw from a numbered body holster and keep grip held. Release to drop or throw. Your dropped copy shows **[Yours]** and remembers its original holster. |
-| `PhysicalHolstering` | `0` | Release grip inside an enabled numbered holster. A field pickup takes that slot and the previous item stays in inventory. Return a personal weapon to its original slot. |
-| `ReturnOwnedAtAnySlot` | `0` | With physical holstering on, releasing an owned weapon at any enabled holster sends it back to its original slot. The touched slot keeps its assignment. |
+| Section | Setting | Default | What it does when on |
+| --- | --- | --- | --- |
+| `[Holsters]` | `HoldToKeep` | `1` | To keep a weapon, hold **A** (right hand) or **X** (left hand) for one second. Keep the button pressed as you release grip. |
+| `[Holsters]` | `ThrowableWeapons` | `0` | Draw a weapon from a numbered holster and release grip to drop or throw it. The dropped weapon shows **[Yours]** and remembers its slot. |
+| `[Holsters]` | `PhysicalHolstering` | `0` | Release grip inside a numbered holster to store a field pickup there. The previous item stays in inventory. To return a **[Yours]** weapon, use its original holster. |
+| `[Holsters]` | `ReturnOwnedAtAnySlot` | `0` | With `PhysicalHolstering=1`, release a **[Yours]** weapon at any enabled holster to send it home. For example, returning a slot 7 pistol at slot 6 sends it to 7 and keeps the item in slot 6. |
+| `[NPC]` | `ThrowEmptyPistols` | `1` | Human opponents can throw an empty pistol at close range once they run out of spare ammo. Requires kNVSE Animation Plugin. |
 
-If a field pickup takes the slot of a weapon you dropped, the dropped weapon loses its **[Yours]** label. You can pick it up again and assign it to another holster, even if the replacement is the same model.
+If you drop your pistol and assign a field pickup to its slot, the dropped pistol loses its **[Yours]** label. You can pick it up and assign it to a different slot.
 
 ## NPC combat
 
-A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons. Miniguns and missile launchers fall outside this rule. Set `ThrowEmptyPistols=0` under `[NPC]` to turn off NPC throws independently.
+A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons. Miniguns and missile launchers fall outside this rule.
 
 The pistol leaves the NPC’s hand during the throwing animation. It stays empty when picked up. An NPC who finds more ammo can reload it and throw it again after firing the last round. You can dodge it and pick it up where it lands. A hit uses the same weight and speed rules as a player throw.
 
