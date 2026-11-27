@@ -55,6 +55,12 @@ I use physical holsters to keep weapons and leave A/X free for TTWVR’s usual c
 
 For example, if slot 6 holds a Stimpak, returning your slot 7 pistol there keeps the Stimpak in slot 6. Storing a pistol you just found there gives the pistol slot 6 and leaves the Stimpak in your inventory.
 
+## Field Lights and Advanced Holsters
+
+You can keep a pistol and an R-3 flare in the same holster with Field Weapons **1.1.8-r11**, Advanced Holsters **r3**, and Field Lights **r12**. In MO2, place the [r12 flare patch](https://github.com/ethanfel/TTWVR-Advanced-Holsters/releases/download/v1.1.8-r2/TTWVR-Advanced-Holsters-Field-Lights-r12.zip) below Field Lights so its DLL wins.
+
+Assign the pistol as the main item and **R-3 Flares** as the alternate. Grip and pull to draw the pistol. Hold trigger as you grip to draw the flare. With `ThrowableWeapons=1`, release the pistol away from a holster to drop or throw it. Return a capped flare to the holster you drew it from.
+
 ## NPC combat
 
 A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons. Miniguns and missile launchers fall outside this rule.

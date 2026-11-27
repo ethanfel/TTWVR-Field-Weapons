@@ -46,14 +46,19 @@ bool reloadActive(Ptr gun) {
 constexpr DWORD clockMask = 0x00ffffff;
 using SlotAction=void (__cdecl*)(int,int,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned);
 SlotAction slotAction{};
+using BankForm=int (__cdecl*)(int hand,int slot);
+BankForm advancedHolsterForm{};
 std::atomic<DWORD> holsterEvents[2]{};
 void __cdecl observeSlot(int hand,int slot,unsigned a,unsigned b,unsigned c,unsigned d,
                          unsigned e,unsigned f,unsigned g,unsigned h) {
+    // The bank is latched on grip. Read it before the forwarded draw can clear it.
+    const bool primary=unsigned(hand)<2 && unsigned(slot)<8 &&
+        (!advancedHolsterForm || advancedHolsterForm(hand,slot)==-1);
     slotAction(hand,slot,a,b,c,d,e,f,g,h);
     if (unsigned(hand)>=2) return;
     int selected;
     std::memcpy(&selected,base+layout->handSlots+hand*4,4);
-    const bool accepted=unsigned(slot)<8 && selected==slot;
+    const bool accepted=primary && selected==slot;
     holsterEvents[hand].store(accepted ? ((GetTickCount()&clockMask)<<8)|unsigned(slot+1) : 0);
 }
 bool matches(const Layout& candidate) {
@@ -211,11 +216,22 @@ bool observeHolsters() {
     const unsigned char args[]{0x53,0x56,0x57,0xe8}, cleanup[]{0x83,0xc4,0x28};
     int previous;
     std::memcpy(&previous,call+1,4);
-    if (std::memcmp(call-3,args,sizeof args) || std::memcmp(call+5,cleanup,sizeof cleanup) ||
-        call+5+previous!=base+layout->holsterAction) return false;
+    if (std::memcmp(call-3,args,sizeof args) || std::memcmp(call+5,cleanup,sizeof cleanup)) return false;
+    Ptr next=call+5+previous;
+    HMODULE advanced=GetModuleHandleW(L"TTWVRAdvancedHolsters.dll");
+    auto bank=advanced ? reinterpret_cast<BankForm>(reinterpret_cast<uintptr_t>(
+        GetProcAddress(advanced,"AdvancedHolsterFormV1"))) : nullptr;
+    if (next!=base+layout->holsterAction) {
+        // Advanced Holsters can already own this call. Forward through its draw
+        // handler so that its per-hand item selection and cleanup still run.
+        MEMORY_BASIC_INFORMATION page{};
+        if (!bank || !VirtualQuery(next,&page,sizeof page) || page.AllocationBase!=advanced ||
+            page.State!=MEM_COMMIT || (page.Protect&PAGE_GUARD) || !(page.Protect&0xf0)) return false;
+    }
     DWORD old,ignored;
     if (!VirtualProtect(call,5,PAGE_EXECUTE_READWRITE,&old)) return false;
-    slotAction=reinterpret_cast<SlotAction>(base+layout->holsterAction);
+    advancedHolsterForm=bank;
+    slotAction=reinterpret_cast<SlotAction>(next);
     auto displacement=DWORD(reinterpret_cast<uintptr_t>(observeSlot)-reinterpret_cast<uintptr_t>(call+5));
     std::memcpy(call+1,&displacement,4);
     FlushInstructionCache(GetCurrentProcess(),call,5);
