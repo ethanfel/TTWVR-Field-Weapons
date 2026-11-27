@@ -131,6 +131,7 @@ bool connect() {
                 !std::memcmp(base+0x3a9ad0,capture,sizeof capture) &&
                 !std::memcmp(base+0x3b8f30,remember,sizeof remember) &&
                 !std::memcmp(base+0x39a9a0,restore,sizeof restore) &&
+                !std::memcmp(base+0x39a9c6,"\xe8\x85\x75\x00\x00",5) &&
                 !std::memcmp(base+0x23a000,slot,sizeof slot);
         }
         break;
@@ -169,6 +170,16 @@ bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot) 
     int slot=numberedSlot>=1 && numberedSlot<=8 ? numberedSlot-1 : reloadSlot(gun);
     reinterpret_cast<Remember>(base+0x3b8f30)(gun,slot,ammo,&state);
     return true;
+}
+bool rememberEmptyHolster(Ptr gun,Ptr ammo,int numberedSlot,const ReloadState& state) {
+    if (!reloadCache || !gun || !ammo || numberedSlot<1 || numberedSlot>8 ||
+        state.live || state.magazineRounds) return false;
+    // Use the exact (form ID, zero-based slot) lookup called by TTWVR's restore.
+    using Find=Ptr (__cdecl*)(unsigned,int);
+    unsigned formID;
+    std::memcpy(&formID,gun+0xc,sizeof formID);
+    if (reinterpret_cast<Find>(base+0x3a1f50)(formID,numberedSlot-1)) return false;
+    return rememberReload(gun,ammo,state,numberedSlot);
 }
 void applyReload(Ptr player,Ptr gun) {
     using Apply=void (__cdecl*)(Ptr);

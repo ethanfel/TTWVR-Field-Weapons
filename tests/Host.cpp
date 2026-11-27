@@ -108,6 +108,28 @@ int wmain(int argc,wchar_t** argv) {
         unsigned char field=0,holstered=1;
         assert(resolve(&field)==-1 && resolve(&holstered)==6);
     }
+    unsigned char gun[16]{},ammo[16]{};
+    const unsigned gunID=0x1735d4, ammoID=0x4241;
+    std::memcpy(gun+0xc,&gunID,sizeof gunID);
+    std::memcpy(ammo+0xc,&ammoID,sizeof ammoID);
+    host::ReloadState empty{};
+    assert(host::rememberEmptyHolster(gun,ammo,1,empty)==current);
+    assert(!host::rememberEmptyHolster(gun,ammo,1,empty));
+    if (current) {
+        host::ReloadState loaded{};
+        loaded.live=loaded.magazineRounds=7;
+        assert(host::rememberReload(gun,ammo,loaded,2));
+        assert(!host::rememberEmptyHolster(gun,ammo,2,empty));
+        assert(!host::rememberEmptyHolster(gun,ammo,3,loaded));
+        empty.magazine=0;
+        assert(host::rememberEmptyHolster(gun,ammo,3,empty));
+        using Find=host::Ptr (__cdecl*)(unsigned,int);
+        auto find=reinterpret_cast<Find>(base+0x3a1f50);
+        auto record=find(gunID,1);
+        int rounds;
+        std::memcpy(&rounds,record+0x10,sizeof rounds);
+        assert(rounds==7 && find(gunID,2)[0x14]==0);
+    }
     testPouch(base,current);
     for (auto slot : slots) {
         assert(*slot!=prior);

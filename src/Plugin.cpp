@@ -165,11 +165,11 @@ end)");
     holdToKeep=GetPrivateProfileIntA("Holsters","HoldToKeep",1,ini)!=0;
     physicalStore=GetPrivateProfileIntA("Holsters","PhysicalHolstering",0,ini)!=0;
     anyOwnedSlot=GetPrivateProfileIntA("Holsters","ReturnOwnedAtAnySlot",0,ini)!=0;
+    keyOwner=scripts->compile("int slot\nbegin Function {slot}\n SetFunctionValue (GetHotkeyItemRef slot)\nend");
     bool throwable=GetPrivateProfileIntA("Holsters","ThrowableWeapons",0,ini)!=0;
     if (throwable || physicalStore) {
         readSlot=scripts->compile("ref item\nbegin Function {item}\n SetFunctionValue (item.AuxVarGetFlt \"_TTWVRFieldSlot\")\nend");
         writeSlot=scripts->compile("ref item\nint slot\nbegin Function {item slot}\n item.AuxVarSetFlt \"_TTWVRFieldSlot\" slot\nend");
-        keyOwner=scripts->compile("int slot\nbegin Function {slot}\n SetFunctionValue (GetHotkeyItemRef slot)\nend");
         // A null entry is a pre-r7 slot. The player reference means that the slot
         // was filled again, even if its new weapon has since been dropped.
         getClaim=scripts->compile(R"(int slot
@@ -422,6 +422,35 @@ void claimSlot(int slot,Ptr claimant) {
     if (previous.type==2 && previous.object!=claimant && loose(previous.object) && markedSlot(previous.object)==slot)
         clearHome(previous.object,slot);
 }
+void rememberEmptyHolsters(Ptr receivedAmmo,const Equipment& previous) {
+    if (!keyOwner) return;
+    for (int slot=1;slot<=8;++slot) {
+        Value owner=call(keyOwner,slot);
+        if (owner.type!=2 || !owner.object) continue;
+        Ptr gun=ptr(owner.object,0x20);
+        if (!eligibleForm(gun) || !supportsAmmo(gun,receivedAmmo)) continue;
+        // The newly acquired rounds are accounted for separately. Existing
+        // alternate ammo makes the previously loaded count ambiguous.
+        Ptr ammo=ptr(gun,0xa8);
+        if (type(ammo)==0x55) {
+            bool otherRounds=false;
+            for (Ptr node=ammo+0x18;node;node=ptr(node,4)) {
+                Ptr other=ptr(node,0);
+                if (other && other!=receivedAmmo && inventory(other)!=0) { otherRounds=true; break; }
+            }
+            if (otherRounds) continue;
+        }
+        Ptr stack=ptr(readRef(id(owner.object)),8);
+        if (!stack || field<unsigned>(extra(stack,0x6e),0x10)>0) continue;
+        host::ReloadState state{};
+        if (previous.form==gun && stack==previous.stack) {
+            if (previous.clip.rounds>0) continue;
+            if (previous.clip.hasAction) state=previous.clip.action;
+        }
+        if (host::rememberEmptyHolster(gun,receivedAmmo,slot,state))
+            log("holster_empty_recorded base=%08x slot=%d ammo=%08x",id(gun),slot,id(receivedAmmo));
+    }
+}
 void borrow(Ptr pc,Ptr ref,int hand,const Equipment& previous) {
     Ptr form=ptr(ref,0x20);
     unsigned source=id(ref);
@@ -459,8 +488,10 @@ void borrow(Ptr pc,Ptr ref,int hand,const Equipment& previous) {
             int received=std::max(0,afterTake-carried);
             if (!native && !storedLoad) clip.rounds=received;
             else if (received<clip.rounds) call(addAmmo,clip.ammo,clip.rounds-received);
+            int total=inventory(clip.ammo);
+            if (!carried && total>0) rememberEmptyHolsters(clip.ammo,previous);
             log("ammo_pickup source=%08x ammo=%08x rounds=%d native_credit=%d carried=%d",
-                source,id(clip.ammo),clip.rounds,received,inventory(clip.ammo));
+                source,id(clip.ammo),clip.rounds,received,total);
         }
     }
     auto after=stacks(pc,form);
@@ -865,7 +896,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",15};
+    *info={1,"TTWVR Field Weapons",16};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {
