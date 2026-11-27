@@ -23,9 +23,9 @@ ReadRef readRef;
 void *hasContact;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*fundedClip,*writeClip,*available;
 void *addAmmo,*removeAmmo,*readSlot,*writeSlot,*keyOwner,*selectAmmo;
-void *readAction,*writeAction,*ownedLabel;
+void *readAction,*writeAction,*ownedLabel,*assignSlot;
 unsigned lastFocus;
-bool extended;
+bool extended,physicalStore,anyOwnedSlot,holdToKeep;
 constexpr DWORD keepHoldMs=1000;
 bool initialized,ready,loaded,npcReady;
 unsigned gated, reported{};
@@ -138,7 +138,11 @@ end)");
         GetModuleHandleW(L"kNVSE.dll") && npc::initialize(scripts,log);
     if (!gameplay || !materialize || !holster || !readClip || !readAmmo || !fundedClip || !writeClip ||
         !available || !addAmmo || !removeAmmo || !selectAmmo || !host::connect()) return false;
-    if (GetPrivateProfileIntA("Holsters","ThrowableWeapons",0,ini)) {
+    holdToKeep=GetPrivateProfileIntA("Holsters","HoldToKeep",1,ini)!=0;
+    physicalStore=GetPrivateProfileIntA("Holsters","PhysicalHolstering",0,ini)!=0;
+    anyOwnedSlot=GetPrivateProfileIntA("Holsters","ReturnOwnedAtAnySlot",0,ini)!=0;
+    bool throwable=GetPrivateProfileIntA("Holsters","ThrowableWeapons",0,ini)!=0;
+    if (throwable || physicalStore) {
         readSlot=scripts->compile("ref item\nbegin Function {item}\n SetFunctionValue (item.AuxVarGetFlt \"_TTWVRFieldSlot\")\nend");
         writeSlot=scripts->compile("ref item\nint slot\nbegin Function {item slot}\n item.AuxVarSetFlt \"_TTWVRFieldSlot\" slot\nend");
         keyOwner=scripts->compile("int slot\nbegin Function {slot}\n SetFunctionValue (GetHotkeyItemRef slot)\nend");
@@ -151,7 +155,10 @@ begin Function {item}
  endif
  sv_Destruct displayName
 end)");
-        extended=readSlot && writeSlot && keyOwner && host::observeHolsters();
+        if (physicalStore)
+            assignSlot=scripts->compile("ref item\nint slot\nbegin Function {item slot}\n SetFunctionValue (item.SetHotkeyItemRef slot)\nend");
+        physicalStore=physicalStore && assignSlot && keyOwner && readSlot && writeSlot;
+        extended=throwable && readSlot && writeSlot && keyOwner && host::observeHolsters();
     }
     return true;
 }
@@ -209,7 +216,7 @@ Ptr defaultAmmo(Ptr weapon) {
     return type(a)==0x29 ? a : nullptr;
 }
 void restoreSlot(Ptr pc,Ptr form,Ptr stack,int slot) {
-    if (!extended || slot<1 || slot>8 || !stacks(pc,form).contains(stack) || hotkey(stack)) return;
+    if (!keyOwner || slot<1 || slot>8 || !stacks(pc,form).contains(stack) || hotkey(stack)) return;
     Value owner;
     if (!scripts->call(keyOwner,nullptr,nullptr,&owner,1,slot) || (owner.type==2 && owner.object)) return;
     if (setHotkey(stack,slot)) log("holster_restored base=%08x slot=%d",id(form),slot);
@@ -322,7 +329,7 @@ void borrow(Ptr pc,Ptr ref,int hand,const Equipment& previous) {
     auto before=stacks(pc,form);
     Vec angles=field<Vec>(ref,0x24);
     int slot=0;
-    if (extended) {
+    if (readSlot) {
         auto marker=call(readSlot,ref);
         if (marker.type==1 && marker.number>=1 && marker.number<=8) slot=int(marker.number);
     }
@@ -409,6 +416,33 @@ void finishPickup(Ptr pc,DWORD now) {
     borrow(pc,ref,pending.hand,pending.previous);
 }
 void cancel(const char* reason) { log("end base=%08x reason=%s",id(loan.base),reason); loan={}; }
+bool storeAtHolster(Ptr pc,int touched) {
+    if (!touched || (loan.slot && touched!=loan.slot && !anyOwnedSlot)) return false;
+    int slot=loan.slot ? loan.slot : touched;
+    auto items=stacks(pc,loan.base);
+    if (!items.contains(loan.stack) || quantity(loan.stack)!=1 || items.worn()!=loan.stack ||
+        equipped(pc)!=loan.base) return false;
+    Clip clip=physicalMagazine(pc,loan.base);
+    bool reassignedHome=false;
+    if (hotkey(loan.stack)!=slot) {
+        Value owner;
+        if (!scripts->call(keyOwner,nullptr,nullptr,&owner,1,slot)) return false;
+        if (owner.type==2 && owner.object) {
+            reassignedHome=loan.slot && ptr(owner.object,0x20)!=loan.base;
+            if (!reassignedHome) {
+                // Only the old hotkey moves. JIP leaves the previous item in inventory.
+                Ptr item=makeRef(pc,loan.base,1,loan.stack);
+                if (!item || call(assignSlot,item,slot).number!=1) return false;
+            }
+        } else if (!setHotkey(loan.stack,slot)) return false;
+    }
+    if (!reassignedHome && clip.hasAction) host::rememberReload(loan.base,clip.ammo,clip.action,slot);
+    call(holster);
+    log("holster_store base=%08x hand=%d touched=%d home=%d assigned=%d clip=%d",
+        id(loan.base),loan.hand,touched,loan.slot,reassignedHome?0:slot,clip.ammo?clip.rounds:-1);
+    cancel(reassignedHome ? "home reassigned; kept in inventory" : "holstered");
+    return true;
+}
 void markHolsterDrop(Ptr ref,int slot) {
     if (!slot) return;
     call(writeSlot,ref,slot);
@@ -603,7 +637,7 @@ void frame() {
     flights.erase(std::remove_if(flights.begin(),flights.end(),
         [pc,now](Flight& flight){return finishFlight(flight,pc,now);}),flights.end());
     // JIP display names are session-local. Reapply the persistent slot marker on focus after loading.
-    if (extended && ownedLabel) {
+    if (ownedLabel && readSlot) {
         Ptr ui=*reinterpret_cast<Ptr*>(0x11d8a80);
         Ptr target=ptr(ui,0xfc);
         if (id(target)!=lastFocus) {
@@ -635,13 +669,15 @@ void frame() {
         if (validPoint) velocity=loan.motion.step(point,origin,now);
         else loan.motion.clear();
         if (!input.grip) {
-            if (loan.holdingKeep && input.keep && now-loan.keepSince>=keepHoldMs) {
+            if (physicalStore && validPoint && storeAtHolster(pc,host::holsterAt(pc,h))) return;
+            if (holdToKeep && loan.holdingKeep && input.keep && now-loan.keepSince>=keepHoldMs) {
                 if (loan.slot) { restoreSlot(pc,loan.base,loan.stack,loan.slot); call(holster); }
                 cancel("kept");
             }
             else release(pc,validPoint?&point:nullptr,velocity,now);
             return;
         }
+        if (!holdToKeep) return;
         if (!input.keep) { loan.armedKeep=true; loan.holdingKeep=false; }
         if (input.keep && loan.armedKeep) {
             if (!loan.holdingKeep) { loan.keepSince=now; loan.holdingKeep=true; }
@@ -680,7 +716,8 @@ void __cdecl message(Message* msg) {
         if (!loaded) return;
         if (!initialized) {
             initialized=true; ready=initialize();
-            log("version=%s host=%s ready=%d impacts=%d npc_throws=%d throwable_holsters=%d",FIELD_WEAPONS_VERSION,host::version(),ready,hasContact!=nullptr,npcReady,extended);
+            log("version=%s host=%s ready=%d impacts=%d npc_throws=%d throwable_holsters=%d physical_holstering=%d any_owned_slot=%d hold_to_keep=%d",
+                FIELD_WEAPONS_VERSION,host::version(),ready,hasContact!=nullptr,npcReady,extended,physicalStore,anyOwnedSlot,holdToKeep);
         }
         if (ready) frame();
     }
@@ -688,7 +725,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",11};
+    *info={1,"TTWVR Field Weapons",12};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

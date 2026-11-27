@@ -27,11 +27,18 @@ A thrown weapon damages the first NPC or creature it physically hits. Heavier we
 
 A hard hit can also stagger the target once. Wider, taller actors resist lighter throws. For example, a thrown pistol can stagger a raider while a super mutant takes a heavier or faster throw. The target plays a brief hit animation if its skeleton has a compatible one.
 
-## Optional holster throws
+## Holster settings
 
-In `Data/NVSE/Plugins/TTWVRFieldWeapons.ini`, set `ThrowableWeapons=1` under `[Holsters]` and restart the game. The default is `0`.
+Edit `[Holsters]` in `Data/NVSE/Plugins/TTWVRFieldWeapons.ini` and restart the game.
 
-Draw a weapon from a numbered body holster and keep grip held. Release grip to drop or throw it. Pick it up again, hold **A** (right) or **X** (left) for one second, then release grip while holding the button to store it. On the ground, your holstered copy has **[Yours]** after its name. The original slot is remembered. TTWVR can fill it with an identical spare while the weapon is on the ground. If you assign a different item, it keeps the slot.
+| Setting | Default | Behavior when enabled |
+| --- | --- | --- |
+| `HoldToKeep` | `1` | Hold A/X for one second and release grip to keep the weapon. Set to `0` to use A/X exclusively for TTWVR controls such as ejecting a magazine. |
+| `ThrowableWeapons` | `0` | Draw from a numbered body holster and keep grip held. Release to drop or throw. Your dropped copy shows **[Yours]** and remembers its original holster. |
+| `PhysicalHolstering` | `0` | Release grip inside an enabled numbered holster. A field pickup takes that slot and the previous item stays in inventory. Return a personal weapon to its original slot. |
+| `ReturnOwnedAtAnySlot` | `0` | With physical holstering on, releasing an owned weapon at any enabled holster sends it back to its original slot. The touched slot keeps its assignment. |
+
+If you assigned a different item to the original slot while your weapon was on the ground, returning the weapon keeps it in inventory and preserves the new assignment.
 
 ## NPC combat
 

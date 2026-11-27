@@ -19,12 +19,13 @@ struct ReloadState {
 };
 static_assert(sizeof(ReloadState)==0x34);
 bool readReload(Ptr gun,ReloadState& state);
-bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state);
+bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot=0);
 void applyReload(Ptr player,Ptr gun);
 bool connect();
 const char* version();
 bool observeHolsters();
 int recentHolster(int hand);
+int holsterAt(Ptr player,int hand);
 void forgetHolsters();
 Input input(int hand);
 Ptr held(int hand);

@@ -15,17 +15,17 @@ struct Layout {
     unsigned xrTable, vrTable, xrValidStore, vrValidStore;
     GrabSlot primary, secondary;
     unsigned take, draw, drawHand, physicalPose, manager;
-    unsigned holsterActionCall, holsterAction, handSlots;
+    unsigned holsterActionCall, holsterAction, handSlots, nearestHolster;
 };
 constexpr Layout layouts[] = {
     {"1.1.8", 0x6b07a53e, 0x1ffa000,
      0xcf62e8, 0xcf6450, 0x8302bb, 0x80b0f4,
      {0x1744d05,0x1240ed8,0x1745ae0}, {0x1744dd4,0x1744dd8,0x1744ddc},
-     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0, 0x237aab, 0x23e7c0, 0x1243fcc},
+     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0, 0x237aab, 0x23e7c0, 0x1243fcc, 0x23cbd0},
     {"1.1.7", 0x6afa9b4f, 0x1d84000,
      0xaf3568, 0xaf36d0, 0x6f0e9b, 0x6cbbb4,
      {0x1538805,0x1035e60,0x15395e0}, {0x15388d4,0x15388d8,0x15388dc},
-     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0, 0x225ecb, 0x22a440, 0x1038e1c},
+     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0, 0x225ecb, 0x22a440, 0x1038e1c, 0x229680},
 };
 Ptr base;
 const Layout* layout;
@@ -134,11 +134,11 @@ bool readReload(Ptr gun,ReloadState& state) {
     using Fn=bool (__cdecl*)(ReloadState*);
     return reloadActive(gun) && reinterpret_cast<Fn>(base+0x3a9ad0)(&state);
 }
-bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state) {
+bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot) {
     if (!reloadCache || !gun || !ammo) return false;
     using Slot=int (__cdecl*)(Ptr);
     using Remember=void (__cdecl*)(Ptr,int,Ptr,const ReloadState*);
-    int slot=reinterpret_cast<Slot>(base+0x23a000)(gun);
+    int slot=numberedSlot>=1 && numberedSlot<=8 ? numberedSlot-1 : reinterpret_cast<Slot>(base+0x23a000)(gun);
     reinterpret_cast<Remember>(base+0x3b8f30)(gun,slot,ammo,&state);
     return true;
 }
@@ -163,6 +163,15 @@ bool observeHolsters() {
     FlushInstructionCache(GetCurrentProcess(),call,5);
     VirtualProtect(call,5,old,&ignored);
     return true;
+}
+int holsterAt(Ptr player,int hand) {
+    if (!layout || !player || unsigned(hand)>=2) return 0;
+    // Use the same enabled spheres, anchors, radii and hand eligibility as a native draw.
+    Ptr fn=base+layout->nearestHolster;
+    const unsigned char start[]{0x83,0xec,0x68,0xa1};
+    if (std::memcmp(fn,start,sizeof start)) return 0;
+    int index=reinterpret_cast<int (__cdecl*)(Ptr,int)>(fn)(player,hand);
+    return unsigned(index)<8 ? index+1 : 0;
 }
 int recentHolster(int hand) {
     auto event=holsterEvents[hand].load();
