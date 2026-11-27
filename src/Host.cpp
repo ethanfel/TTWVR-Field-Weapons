@@ -171,14 +171,28 @@ bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot) 
     reinterpret_cast<Remember>(base+0x3b8f30)(gun,slot,ammo,&state);
     return true;
 }
-bool rememberEmptyHolster(Ptr gun,Ptr ammo,int numberedSlot,const ReloadState& state) {
-    if (!reloadCache || !gun || !ammo || numberedSlot<1 || numberedSlot>8 ||
-        state.live || state.magazineRounds) return false;
-    // Use the exact (form ID, zero-based slot) lookup called by TTWVR's restore.
+bool readHolsterReload(Ptr gun,int numberedSlot,unsigned& ammoID,ReloadState& state) {
+    if (!reloadCache || !gun || numberedSlot<1 || numberedSlot>8) return false;
+    // TTWVR looks up the record by (weapon form ID, zero-based hotkey).
     using Find=Ptr (__cdecl*)(unsigned,int);
     unsigned formID;
     std::memcpy(&formID,gun+0xc,sizeof formID);
-    if (reinterpret_cast<Find>(base+0x3a1f50)(formID,numberedSlot-1)) return false;
+    Ptr entry=reinterpret_cast<Find>(base+0x3a1f50)(formID,numberedSlot-1);
+    if (!entry) return false;
+    std::memcpy(&ammoID,entry+8,sizeof ammoID);
+    std::memcpy(&state,entry+0x10,sizeof state);
+    return true;
+}
+bool rememberEmptyHolster(Ptr gun,Ptr ammo,int numberedSlot,const ReloadState& state) {
+    if (numberedSlot<1 || numberedSlot>8 || state.live || state.magazineRounds) return false;
+    ReloadState saved{};
+    unsigned ammoID{};
+    if (readHolsterReload(gun,numberedSlot,ammoID,saved)) {
+        if (ammoID || saved.live || saved.magazineRounds) return false;
+        // Holstering with no reserve can produce a valid empty action with
+        // no ammo ID. Preserve its magazine, slide and chambers.
+        return rememberReload(gun,ammo,saved,numberedSlot);
+    }
     return rememberReload(gun,ammo,state,numberedSlot);
 }
 void applyReload(Ptr player,Ptr gun) {

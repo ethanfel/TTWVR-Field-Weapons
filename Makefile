@@ -1,6 +1,6 @@
 WINCXX ?= i686-w64-mingw32-g++
 FLAGS := -std=c++17 -O2 -Wall -Wextra -Werror
-VERSION := 1.1.8-r9
+VERSION := 1.1.8-r10
 PLUGIN := build/NVSE/Plugins/TTWVRFieldWeapons.dll
 ZIP := build/TTWVR-Field-Weapons-$(VERSION).zip
 

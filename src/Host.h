@@ -29,6 +29,7 @@ struct ReloadState {
 static_assert(sizeof(ReloadState)==0x34);
 bool readReload(Ptr gun,ReloadState& state);
 bool rememberReload(Ptr gun,Ptr ammo,const ReloadState& state,int numberedSlot=0);
+bool readHolsterReload(Ptr gun,int numberedSlot,unsigned& ammoID,ReloadState& state);
 bool rememberEmptyHolster(Ptr gun,Ptr ammo,int numberedSlot,const ReloadState& state);
 void applyReload(Ptr player,Ptr gun);
 bool connect();

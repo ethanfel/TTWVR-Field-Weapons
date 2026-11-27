@@ -256,15 +256,18 @@ void readWorldAction(Ptr ref,Clip& clip) {
         std::isfinite(s.action) && s.action>=0 && s.action<=1 && s.chamberIndex>=0 && s.chamberIndex<16 &&
         std::all_of(s.chambers,s.chambers+16,[](unsigned char value){return value<=2;});
 }
-void setMagazine(Ptr pc,Clip clip,Ptr weapon=nullptr) {
+void setMagazine(Ptr pc,Clip clip,Ptr weapon) {
     Ptr info=ammoInfo(pc);
     Ptr activeAmmo=ptr(info,8);
-    if (!clip.ammo || clip.rounds<0 || (activeAmmo!=clip.ammo && (activeAmmo || clip.rounds))) return;
+    if (!clip.ammo || clip.rounds<0) return;
+    if (activeAmmo!=clip.ammo) {
+        if (clip.rounds || (activeAmmo && !supportsAmmo(weapon,activeAmmo))) return;
+        if (activeAmmo) clip.ammo=activeAmmo;
+    }
     Value count=call(available,clip.ammo);
     if (count.type!=1) return;
     int rounds=std::clamp(clip.rounds,0,std::max(0,int(count.number)));
     if (info) std::memcpy(info+4,&rounds,sizeof rounds);
-    if (!weapon) return;
     host::ReloadState action{};
     if (clip.hasAction && clip.action.live==rounds) action=clip.action;
     else {
@@ -312,6 +315,17 @@ void storeMagazine(Ptr dropped,Clip clip,int before) {
 Equipment equipment(Ptr pc) {
     Ptr form=equipped(pc);
     Equipment old={form,form ? stacks(pc,form).worn() : nullptr,drawn(pc),host::drawHand(),physicalMagazine(pc,form)};
+    // A holstered weapon can remain equipped after TTWVR has shut down its
+    // active reload mechanism. Read the numbered slot before the loan adds ammo.
+    unsigned ammoID{};
+    host::ReloadState saved{};
+    if (!old.out && host::readHolsterReload(form,hotkey(old.stack),ammoID,saved)) {
+        Ptr ammo=lookup(ammoID);
+        if (!ammoID && !saved.live && !saved.magazineRounds)
+            ammo=old.clip.ammo ? old.clip.ammo : defaultAmmo(form);
+        if (supportsAmmo(form,ammo) && saved.live>=0)
+            old.clip={ammo,saved.live,saved,true};
+    }
     old.plain=plainCondition(old.stack,old.healthBits);
     return old;
 }
@@ -333,7 +347,11 @@ void finishRestore(Ptr pc,DWORD now) {
     }
     restoring={};
     if (old.out) host::draw(old.hand,old.form); else call(holster);
+    int before=magazine(pc).rounds;
     setMagazine(pc,old.clip,old.form);
+    if (!old.out && old.clip.ammo && before!=magazine(pc).rounds)
+        log("holster_restore base=%08x slot=%d auto_clip=%d restored_clip=%d",
+            id(old.form),hotkey(items.worn()),before,magazine(pc).rounds);
 }
 void restore(Ptr pc,const Equipment& old) {
     restoring={};
@@ -365,6 +383,7 @@ void restore(Ptr pc,const Equipment& old) {
     DWORD now=GetTickCount();
     restoring={old,merged,ptr(pc,0x40),equipped(pc),now};
     restoring.wanted.stack=exact;
+    watchedReloadForm=old.form;
     equip(pc,old.form,exact);
     finishRestore(pc,now);
 }
@@ -637,8 +656,6 @@ bool finishEquip(Ptr pc,DWORD now) {
             if (load.ammo) {
                 load.rounds=std::min(load.rounds,capacity(loan.base,worn));
                 if (magazine(pc).ammo!=load.ammo && load.rounds>0) call(selectAmmo,load.ammo);
-                Ptr activeAmmo=magazine(pc).ammo;
-                if (!load.rounds && supportsAmmo(loan.base,activeAmmo)) load.ammo=activeAmmo;
                 setMagazine(pc,load,loan.base);
             }
             loan.clip=load;
@@ -896,7 +913,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",16};
+    *info={1,"TTWVR Field Weapons",17};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

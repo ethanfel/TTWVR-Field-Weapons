@@ -126,9 +126,16 @@ int wmain(int argc,wchar_t** argv) {
         using Find=host::Ptr (__cdecl*)(unsigned,int);
         auto find=reinterpret_cast<Find>(base+0x3a1f50);
         auto record=find(gunID,1);
-        int rounds;
-        std::memcpy(&rounds,record+0x10,sizeof rounds);
-        assert(rounds==7 && find(gunID,2)[0x14]==0);
+        unsigned savedAmmo{};
+        host::ReloadState read{};
+        assert(host::readHolsterReload(gun,2,savedAmmo,read) && savedAmmo==ammoID && read.live==7);
+        // Reproduce the no-reserve records created by TTWVR itself.
+        std::memset(record+8,0,4);
+        assert(!host::rememberEmptyHolster(gun,ammo,2,empty)); // seven rounds still belong here
+        std::memset(find(gunID,2)+8,0,4);
+        assert(host::rememberEmptyHolster(gun,ammo,3,host::ReloadState{}));
+        assert(host::readHolsterReload(gun,3,savedAmmo,read) && savedAmmo==ammoID && read.magazine==0);
+        assert(!host::readHolsterReload(gun,4,savedAmmo,read));
     }
     testPouch(base,current);
     for (auto slot : slots) {
