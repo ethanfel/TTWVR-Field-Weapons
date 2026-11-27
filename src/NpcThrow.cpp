@@ -100,7 +100,7 @@ bool atRelease(Ptr actor) {
 }
 void advance(Attempt& attempt,Ptr cell,Released released) {
     Ptr actor=lookup(attempt.actor),target=lookup(attempt.target),weapon=lookup(attempt.weapon);
-    if (!nearOpponent(actor,target,cell) || equipped(actor)!=weapon) {
+    if (!nearOpponent(actor,target,cell) || !pistol(weapon) || equipped(actor)!=weapon) {
         trace("npc_throw_cancel actor=%08x reason=combat_or_equipment",attempt.actor);
         attempt.waiting=false;
         return;
@@ -134,6 +134,7 @@ void advance(Attempt& attempt,Ptr cell,Released released) {
     velocity.z+=4.905f*travel;
     // Use the actor's DropItem virtual so its equipped instance and condition transfer together.
     using Drop=Ptr (__thiscall*)(Ptr,Ptr,Ptr,int,Vec*,Vec*);
+    trace("npc_drop_request actor=%08x base=%08x kind=%u",attempt.actor,attempt.weapon,field<unsigned char>(weapon,0xf4));
     Ptr item=field<Drop>(ptr(actor,0),0x3cc)(actor,weapon,stack,1,&from,nullptr);
     if (loose(item) && ptr(item,0x20)==weapon) {
         attempt.released=true;
@@ -161,6 +162,7 @@ void consider(Ptr actor,Ptr cell,uint32_t now) {
         if (type(ammo)==0x55) ammo=ptr(ammo,0x18);
     }
     Value result;
+    trace("npc_throw_request actor=%08x target=%08x base=%08x kind=%u",id(actor),id(target),id(weapon),field<unsigned char>(weapon,0xf4));
     bool started=scripts->call(startAnimation,nullptr,nullptr,&result,1,actor) && result.type==1 && result.number>0;
     trace("npc_throw_animation actor=%08x base=%08x started=%d",id(actor),id(weapon),started);
     attempts.push_back({id(actor),id(target),id(weapon),id(ammo),stack,now,started,false});

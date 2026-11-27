@@ -44,6 +44,18 @@ int wmain(int argc,wchar_t** argv) {
     writeBytes(take,&original,1);
     assert(host::connect() && host::connect());
     assert(std::strcmp(host::version(),current?"1.1.8":"1.1.7")==0);
+    auto actionCall=base+(current?0x237aab:0x225ecb);
+    int originalTarget, target;
+    std::memcpy(&originalTarget,actionCall+1,4);
+    const int foreign=originalTarget+1;
+    writeBytes(actionCall+1,&foreign,4);
+    assert(!host::observeHolsters());
+    std::memcpy(&target,actionCall+1,4);
+    assert(target==foreign && !host::recentHolster(0) && !host::recentHolster(1));
+    writeBytes(actionCall+1,&originalTarget,4);
+    assert(host::observeHolsters() && host::observeHolsters());
+    std::memcpy(&target,actionCall+1,4);
+    assert(target!=originalTarget);
     for (auto slot : slots) {
         assert(*slot!=prior);
         auto poll=reinterpret_cast<Poll>(*slot);

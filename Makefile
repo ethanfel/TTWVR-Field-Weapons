@@ -1,6 +1,6 @@
 WINCXX ?= i686-w64-mingw32-g++
 FLAGS := -std=c++17 -O2 -Wall -Wextra -Werror
-VERSION := 1.1.8-r1
+VERSION := 1.1.8-r2
 PLUGIN := build/NVSE/Plugins/TTWVRFieldWeapons.dll
 ZIP := build/TTWVR-Field-Weapons-$(VERSION).zip
 
@@ -15,6 +15,9 @@ test: tests/Motion.cpp src/Motion.h src/Impact.h
 build/test-host.exe: tests/Host.cpp src/Host.cpp src/Host.h src/Motion.h
 	mkdir -p build
 	$(WINCXX) $(FLAGS) -municode -static tests/Host.cpp src/Host.cpp -o $@
-package: $(PLUGIN) test
-	cd build && zip -q -X -FS $(notdir $(ZIP)) NVSE/Plugins/TTWVRFieldWeapons.dll
+build/NVSE/Plugins/TTWVRFieldWeapons.ini: TTWVRFieldWeapons.ini
+	mkdir -p $(@D)
+	cp $< $@
+package: $(PLUGIN) build/NVSE/Plugins/TTWVRFieldWeapons.ini test
+	cd build && zip -q -X -FS $(notdir $(ZIP)) NVSE/Plugins/TTWVRFieldWeapons.dll NVSE/Plugins/TTWVRFieldWeapons.ini
 .PHONY: all test package

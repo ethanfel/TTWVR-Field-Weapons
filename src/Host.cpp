@@ -15,20 +15,36 @@ struct Layout {
     unsigned xrTable, vrTable, xrValidStore, vrValidStore;
     GrabSlot primary, secondary;
     unsigned take, draw, drawHand, physicalPose, manager;
+    unsigned holsterActionCall, holsterAction, handSlots;
 };
 constexpr Layout layouts[] = {
     {"1.1.8", 0x6b07a53e, 0x1ffa000,
      0xcf62e8, 0xcf6450, 0x8302bb, 0x80b0f4,
      {0x1744d05,0x1240ed8,0x1745ae0}, {0x1744dd4,0x1744dd8,0x1744ddc},
-     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0},
+     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0, 0x237aab, 0x23e7c0, 0x1243fcc},
     {"1.1.7", 0x6afa9b4f, 0x1d84000,
      0xaf3568, 0xaf36d0, 0x6f0e9b, 0x6cbbb4,
      {0x1538805,0x1035e60,0x15395e0}, {0x15388d4,0x15388d8,0x15388dc},
-     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0},
+     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0, 0x225ecb, 0x22a440, 0x1038e1c},
 };
 Ptr base;
 const Layout* layout;
 
+// Observe only TTWVR's physical slot action. Wheel, keyboard and inventory equips
+// never enter this call. The game thread checks which exact stack was drawn.
+constexpr DWORD clockMask = 0x00ffffff;
+using SlotAction=void (__cdecl*)(int,int,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned);
+SlotAction slotAction{};
+std::atomic<DWORD> holsterEvents[2]{};
+void __cdecl observeSlot(int hand,int slot,unsigned a,unsigned b,unsigned c,unsigned d,
+                         unsigned e,unsigned f,unsigned g,unsigned h) {
+    slotAction(hand,slot,a,b,c,d,e,f,g,h);
+    if (unsigned(hand)>=2) return;
+    int selected;
+    std::memcpy(&selected,base+layout->handSlots+hand*4,4);
+    const bool accepted=unsigned(slot)<8 && selected==slot;
+    holsterEvents[hand].store(accepted ? ((GetTickCount()&clockMask)<<8)|unsigned(slot+1) : 0);
+}
 bool matches(const Layout& candidate) {
     const unsigned char validStore[]{0x88,0x86,0x2c,0x01,0,0};
     const unsigned char takeStart[]{0x53,0x55,0x56,0xe8};
@@ -43,7 +59,7 @@ bool matches(const Layout& candidate) {
            !std::memcmp(base+candidate.physicalPose,poseStart,sizeof poseStart);
 }
 std::atomic<DWORD> sample{};
-constexpr DWORD clockMask = 0x00ffffff;
+
 using Poll = bool (__thiscall*)(void*, Ptr);
 template<unsigned Backend> struct Reader {
     static inline Poll next;
@@ -97,6 +113,32 @@ bool connect() {
     }
     return layout!=nullptr;
 }
+bool observeHolsters() {
+    if (!layout) return false;
+    if (slotAction) return true;
+    Ptr call=base+layout->holsterActionCall;
+    const unsigned char args[]{0x53,0x56,0x57,0xe8}, cleanup[]{0x83,0xc4,0x28};
+    int previous;
+    std::memcpy(&previous,call+1,4);
+    if (std::memcmp(call-3,args,sizeof args) || std::memcmp(call+5,cleanup,sizeof cleanup) ||
+        call+5+previous!=base+layout->holsterAction) return false;
+    DWORD old,ignored;
+    if (!VirtualProtect(call,5,PAGE_EXECUTE_READWRITE,&old)) return false;
+    slotAction=reinterpret_cast<SlotAction>(base+layout->holsterAction);
+    auto displacement=DWORD(reinterpret_cast<uintptr_t>(observeSlot)-reinterpret_cast<uintptr_t>(call+5));
+    std::memcpy(call+1,&displacement,4);
+    FlushInstructionCache(GetCurrentProcess(),call,5);
+    VirtualProtect(call,5,old,&ignored);
+    return true;
+}
+int recentHolster(int hand) {
+    auto event=holsterEvents[hand].load();
+    if (!event || ((GetTickCount()-(event>>8))&clockMask)>=3000) return 0;
+    int selected;
+    std::memcpy(&selected,base+layout->handSlots+hand*4,4);
+    return selected==int(event&255)-1 ? selected+1 : 0;
+}
+void forgetHolsters() { for (auto& event:holsterEvents) event.store(0); }
 const char* version() { return layout ? layout->version : "unavailable"; }
 Input input(int hand) {
     DWORD value=sample.load();

@@ -134,7 +134,7 @@ inline Stacks stacks(Ptr pc,Ptr base) {
 // The inventory merges identical guns on pickup. Separate a single unit using
 // Fallout's own extra-data copier. Personal hotkeys and worn state belong to
 // the existing stack. Its condition, mods and other item data belong to both.
-inline Ptr splitOne(Ptr entry,Ptr stack) {
+inline Ptr splitOne(Ptr entry,Ptr stack,bool keepOriginalSingle=false) {
     Ptr head=ptr(entry,0),count=extra(stack,0x24);
     short remain=short(quantity(stack)-1);
     if (!head || !count || remain<1) return nullptr;
@@ -150,14 +150,21 @@ inline Ptr splitOne(Ptr entry,Ptr stack) {
     *reinterpret_cast<unsigned*>(copy)=0x10143e8;
     using Copy=void (__thiscall*)(Ptr,Ptr,bool);
     reinterpret_cast<Copy>(0x412490)(copy,stack,false);
-    for (unsigned type:{0x24u,0x16u,0x17u,0x4au}) if (extra(copy,type)) removeExtra(copy,type);
-    if (remain==1) removeExtra(stack,0x24);
-    else std::memcpy(count+0xc,&remain,sizeof remain);
+    for (unsigned type:{0x16u,0x17u,0x4au}) if (extra(copy,type)) removeExtra(copy,type);
+    Ptr single=keepOriginalSingle?stack:copy, rest=keepOriginalSingle?copy:stack;
+    if (remain>1 && !extra(rest,0x24)) {
+        field<void (__thiscall*)(Ptr,bool)>(ptr(copy,0),0)(copy,true);
+        reinterpret_cast<Free>(0xaa4060)(heap,node);
+        return nullptr;
+    }
+    if (extra(single,0x24)) removeExtra(single,0x24);
+    if (remain==1) removeExtra(rest,0x24);
+    else std::memcpy(extra(rest,0x24)+0xc,&remain,sizeof remain);
     // Prepend without changing the address of the embedded head node.
     std::memcpy(node,head,8);
     std::memcpy(head,&copy,4);
     std::memcpy(head+4,&node,4);
-    return copy;
+    return single;
 }
 inline Ptr equipped(Ptr pc) { return ptr(ptr(ptr(pc,0x68),0x114),8); }
 inline Ptr ammoInfo(Ptr pc) { return ptr(ptr(pc,0x68),0x118); }
@@ -194,12 +201,59 @@ inline void dealImpactDamage(Ptr actor, Ptr attacker, float amount) {
     using Damage=void (__thiscall*)(Ptr,float,float,Ptr);
     field<Damage>(ptr(actor,0),0x338)(actor,amount,0.f,attacker);
 }
-inline bool eligible(Ptr ref) {
-    if (!loose(ref) || quantity(ref+0x44)!=1) return false;
-    Ptr form=ptr(ref,0x20);
+inline bool eligibleForm(Ptr form) {
     // Leave quest items, scripted activations, explosives and nonplayable weapons with TTWVR.
     return type(form)==0x28 && field<unsigned char>(form,0xf4)<10 &&
            !(field<unsigned>(form,8)&0x400) && !ptr(form,0x6c) &&
            !(field<unsigned char>(form,0x100)&0x80);
 }
+inline bool eligible(Ptr ref) {
+    return loose(ref) && quantity(ref+0x44)==1 && eligibleForm(ptr(ref,0x20));
+}
+inline int hotkey(Ptr stack) {
+    Ptr key=extra(stack,0x4a);
+    return key && field<unsigned char>(key,0xc)<8 ? int(key[0xc])+1 : 0;
+}
+inline bool supportsAmmo(Ptr weapon,Ptr ammo) {
+    if (type(ammo)!=0x29) return false;
+    Ptr list=ptr(weapon,0xa8);
+    if (type(list)!=0x55) return list==ammo;
+    for (Ptr n=list+0x18;n;n=ptr(n,4)) if (ptr(n,0)==ammo) return true;
+    return false;
+}
+inline int capacity(Ptr weapon,Ptr stack) {
+    float rounds=field<unsigned char>(weapon,0xb0);
+    unsigned mods=field<unsigned char>(extra(stack,0x8d),0xc);
+    for (unsigned i=0;i<3;++i)
+        if ((mods&(1u<<i)) && field<unsigned>(weapon,0x180+4*i)==2)
+            rounds+=field<float>(weapon,0x18c+4*i);
+    return std::isfinite(rounds) ? int(std::clamp(rounds,0.f,65535.f)) : 0;
+}
+inline Ptr ensureExtra(Ptr list,unsigned char kind,unsigned size,unsigned vtable) {
+    if (Ptr node=extra(list,kind)) return node;
+    using Alloc=Ptr (__thiscall*)(void*,unsigned);
+    Ptr node=reinterpret_cast<Alloc>(0xaa3e40)(reinterpret_cast<void*>(0x11f6238),size);
+    if (!node) return nullptr;
+    std::memset(node,0,size);
+    std::memcpy(node,&vtable,sizeof vtable);
+    node[4]=kind;
+    using Add=Ptr (__thiscall*)(Ptr,Ptr);
+    reinterpret_cast<Add>(0x40ff60)(list,node);
+    return node;
+}
+// Attach to the recovered instance, including when several copies share a base form.
+inline bool setHotkey(Ptr stack,int slot) {
+    Ptr node=ensureExtra(stack,0x4a,0x10,0x101592c);
+    if (!node) return false;
+    node[0xc]=static_cast<unsigned char>(slot-1);
+    return true;
+}
+// A native ExtraAmmo transfers with ordinary Fallout pickups and survives saves.
+inline Ptr worldAmmo(Ptr ref,Ptr ammo) {
+    Ptr node=ensureExtra(ref+0x44,0x6e,0x14,0x1015998);
+    if (!node) return nullptr;
+    std::memcpy(node+0xc,&ammo,sizeof ammo);
+    return node;
+}
+
 }
