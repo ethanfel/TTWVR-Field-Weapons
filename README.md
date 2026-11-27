@@ -41,6 +41,20 @@ Edit `Data/NVSE/Plugins/TTWVRFieldWeapons.ini` and restart the game. Set an opti
 
 If you drop your pistol and assign a field pickup to its slot, the dropped pistol loses its **[Yours]** label. You can pick it up and assign it to a different slot.
 
+### My recommended settings
+
+I use physical holsters to keep weapons and leave A/X free for TTWVR’s usual controls.
+
+| Section | Setting | Value | In-game behavior |
+| --- | --- | --- | --- |
+| `[Holsters]` | `HoldToKeep` | `0` | Turns off the A/X hold-to-keep shortcut. You can still use A/X to eject a magazine. |
+| `[Holsters]` | `ThrowableWeapons` | `1` | Draw your own weapon, then let go away from a holster to drop it. Swing and let go to throw it. |
+| `[Holsters]` | `PhysicalHolstering` | `1` | To keep a weapon you found, release it in a numbered holster. The previous item stays in your inventory. |
+| `[Holsters]` | `ReturnOwnedAtAnySlot` | `1` | Release a weapon marked **[Yours]** at any enabled holster to send it back to its original slot. |
+| `[NPC]` | `ThrowEmptyPistols` | `1` | Nearby human enemies can throw an empty pistol when they run out of spare ammo. Requires kNVSE. |
+
+For example, if slot 6 holds a Stimpak, returning your slot 7 pistol there keeps the Stimpak in slot 6. Storing a pistol you just found there gives the pistol slot 6 and leaves the Stimpak in your inventory.
+
 ## NPC combat
 
 A human opponent can throw their equipped pistol at a visible target within about five metres when the magazine is empty and they have no compatible spare ammo. Enemies with rounds to spare can reload normally. Companions keep their weapons. Miniguns and missile launchers fall outside this rule.
