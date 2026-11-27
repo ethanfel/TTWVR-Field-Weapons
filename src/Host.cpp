@@ -16,16 +16,17 @@ struct Layout {
     GrabSlot primary, secondary;
     unsigned take, draw, drawHand, physicalPose, manager;
     unsigned holsterActionCall, holsterAction, handSlots, nearestHolster;
+    unsigned magazineReturn, spareReturn;
 };
 constexpr Layout layouts[] = {
     {"1.1.8", 0x6b07a53e, 0x1ffa000,
      0xcf62e8, 0xcf6450, 0x8302bb, 0x80b0f4,
      {0x1744d05,0x1240ed8,0x1745ae0}, {0x1744dd4,0x1744dd8,0x1744ddc},
-     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0, 0x237aab, 0x23e7c0, 0x1243fcc, 0x23cbd0},
+     0x1dc4a0, 0x237590, 0x1243e84, 0x84d1b0, 0x1f8cbe0, 0x237aab, 0x23e7c0, 0x1243fcc, 0x23cbd0, 0x3d2132, 0x3d4c80},
     {"1.1.7", 0x6afa9b4f, 0x1d84000,
      0xaf3568, 0xaf36d0, 0x6f0e9b, 0x6cbbb4,
      {0x1538805,0x1035e60,0x15395e0}, {0x15388d4,0x15388d8,0x15388dc},
-     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0, 0x225ecb, 0x22a440, 0x1038e1c, 0x229680},
+     0x1cd9e0, 0x2259b0, 0x1038d74, 0x70acb0, 0x1d1fab0, 0x225ecb, 0x22a440, 0x1038e1c, 0x229680, 0x3b4a4c, 0x3b729e},
 };
 Ptr base;
 const Layout* layout;
@@ -172,6 +173,91 @@ int holsterAt(Ptr player,int hand) {
     if (std::memcmp(fn,start,sizeof start)) return 0;
     int index=reinterpret_cast<int (__cdecl*)(Ptr,int)>(fn)(player,hand);
     return unsigned(index)<8 ? index+1 : 0;
+}
+// These two branches are taken only when TTWVR accepts a release in its pouch.
+// The neighbouring world-drop path supplies the active ammo and round count.
+struct PouchReturn {
+    Ptr resume;
+    const int* rounds;
+    int ammoFrameOffset;
+    LONG pendingId;
+};
+static_assert(sizeof(PouchReturn)==16);
+extern "C" {
+PouchReturn fwPouchReturns[2]{};
+void fwMagazineReturned();
+void fwSpareReturned();
+}
+// Run inside the host's existing frame. Preserve flags and both scratch registers,
+// leave the FP/SIMD state alone, and defer sound playback to the NVSE game tick.
+asm(R"(
+.text
+_fwMagazineReturned:
+    pushl %edx
+    movl $_fwPouchReturns, %edx
+    call .LfwReadPouchAmmo
+    popl %edx
+    jmp *_fwPouchReturns
+_fwSpareReturned:
+    pushl %edx
+    movl $_fwPouchReturns+16, %edx
+    call .LfwReadPouchAmmo
+    popl %edx
+    jmp *_fwPouchReturns+16
+.LfwReadPouchAmmo:
+    pushfl
+    pushl %eax
+    movl 4(%edx), %eax
+    cmpl $0, (%eax)
+    jle .LfwPouchDone
+    movl 8(%edx), %eax
+    movl (%ebp,%eax), %eax
+    testl %eax, %eax
+    jz .LfwPouchDone
+    cmpb $0x29, 4(%eax)
+    jne .LfwPouchDone
+    movl 12(%eax), %eax
+    xchgl %eax, 12(%edx)
+.LfwPouchDone:
+    popl %eax
+    popfl
+    ret
+)");
+bool observePouchReturns() {
+    if (!layout) return false;
+    Ptr branches[]{base+layout->magazineReturn,base+layout->spareReturn};
+    void (*observers[])()={fwMagazineReturned,fwSpareReturned};
+    // Verify both destinations and the push instructions for the native drop arguments.
+    for (unsigned i=0;i<2;++i) {
+        Ptr branch=branches[i];
+        int span;
+        std::memcpy(&span,branch+2,4);
+        if (branch[0]!=0x0f || branch[1]!=(i ? 0x87 : 0x85) || span!=(i ? 0xe4 : 0x82)) return false;
+        Ptr resume=branch+6+span;
+        Ptr args=resume-(i ? 32 : 21);
+        if (args[0]!=0xff || args[1]!=0x35 || args[6]!=0xff || args[7]!=0xb5) return false;
+        auto& event=fwPouchReturns[i];
+        event.resume=resume;
+        std::memcpy(&event.rounds,args+2,4);
+        std::memcpy(&event.ammoFrameOffset,args+8,4);
+        auto roundsRva=reinterpret_cast<uintptr_t>(event.rounds)-reinterpret_cast<uintptr_t>(base);
+        if (roundsRva>layout->imageSize-sizeof(int)) return false;
+        if (event.ammoFrameOffset>=0 || event.ammoFrameOffset < -0x4000) return false;
+    }
+    // Both conditional jumps lie in this single range. Only change their destinations.
+    SIZE_T size=branches[1]+6-branches[0];
+    DWORD old,ignored;
+    if (!VirtualProtect(branches[0],size,PAGE_EXECUTE_READWRITE,&old)) return false;
+    for (unsigned i=0;i<2;++i) {
+        auto offset=DWORD(reinterpret_cast<uintptr_t>(observers[i])-reinterpret_cast<uintptr_t>(branches[i]+6));
+        std::memcpy(branches[i]+2,&offset,sizeof offset);
+    }
+    FlushInstructionCache(GetCurrentProcess(),branches[0],size);
+    VirtualProtect(branches[0],size,old,&ignored);
+    return true;
+}
+unsigned takePouchReturn(unsigned kind) {
+    return kind<2 ? static_cast<unsigned>(InterlockedExchange(&fwPouchReturns[kind].pendingId,0)) : 0;
 }
 int recentHolster(int hand) {
     auto event=holsterEvents[hand].load();

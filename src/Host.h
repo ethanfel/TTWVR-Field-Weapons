@@ -24,6 +24,8 @@ void applyReload(Ptr player,Ptr gun);
 bool connect();
 const char* version();
 bool observeHolsters();
+bool observePouchReturns();
+unsigned takePouchReturn(unsigned kind);
 int recentHolster(int hand);
 int holsterAt(Ptr player,int hand);
 void forgetHolsters();

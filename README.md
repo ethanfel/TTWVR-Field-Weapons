@@ -19,7 +19,7 @@ To upgrade, replace the previous Field Weapons ZIP in your mod manager.
 
 A/X still operates TTWVR’s native controls. On the 10mm pistol it can eject the magazine. Release A/X before releasing grip to drop or throw after using that control.
 
-Dropping a gun leaves its loaded rounds with it. To store the ammunition separately, eject the magazine and pick it up. On a 10mm pistol the chambered round stays in the gun. An empty gun needs a reload. Dropping a borrowed weapon restores your previous one when its inventory copy can be identified. Condition and installed mods stay with the dropped weapon.
+Dropping a gun leaves its loaded rounds with it. To store the ammunition separately, eject the magazine and pick it up. Returning rounds to the ammo pouch plays that ammo type’s pickup sound. On a 10mm pistol the chambered round stays in the gun. An empty gun needs a reload. Dropping a borrowed weapon restores your previous one when its inventory copy can be identified. Condition and installed mods stay with the dropped weapon.
 
 You can borrow one weapon at a time. Quest weapons, scripted pickups and explosives follow TTWVR’s ordinary pickup behavior. Saving while holding a borrowed weapon keeps it in your inventory when that save is loaded.
 

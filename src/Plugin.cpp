@@ -23,7 +23,7 @@ ReadRef readRef;
 void *hasContact;
 void *gameplay,*materialize,*holster,*readClip,*readAmmo,*fundedClip,*writeClip,*available;
 void *addAmmo,*removeAmmo,*readSlot,*writeSlot,*keyOwner,*selectAmmo;
-void *readAction,*writeAction,*ownedLabel,*assignSlot;
+void *readAction,*writeAction,*ownedLabel,*assignSlot,*pouchSound;
 unsigned lastFocus;
 bool extended,physicalStore,anyOwnedSlot,holdToKeep;
 constexpr DWORD keepHoldMs=1000;
@@ -138,6 +138,17 @@ end)");
         GetModuleHandleW(L"kNVSE.dll") && npc::initialize(scripts,log);
     if (!gameplay || !materialize || !holster || !readClip || !readAmmo || !fundedClip || !writeClip ||
         !available || !addAmmo || !removeAmmo || !selectAmmo || !host::connect()) return false;
+    pouchSound=scripts->compile(R"(ref ammo
+ref cue
+begin Function {ammo}
+ let cue := GetPickupSound ammo
+ if eval !cue
+  let cue := ITMAmmunitionUp
+ endif
+ PlaySound cue
+ SetFunctionValue cue
+end)");
+    log("ammo_pouch_audio=%d",pouchSound && host::observePouchReturns());
     holdToKeep=GetPrivateProfileIntA("Holsters","HoldToKeep",1,ini)!=0;
     physicalStore=GetPrivateProfileIntA("Holsters","PhysicalHolstering",0,ini)!=0;
     anyOwnedSlot=GetPrivateProfileIntA("Holsters","ReturnOwnedAtAnySlot",0,ini)!=0;
@@ -634,6 +645,15 @@ void frame() {
         return;
     }
     DWORD now=GetTickCount();
+    for (unsigned kind=0;kind<2;++kind) {
+        unsigned ammo=host::takePouchReturn(kind);
+        if (!ammo) continue;
+        Ptr form=lookup(ammo);
+        if (type(form)!=0x29 || !pouchSound) continue;
+        Value cue=call(pouchSound,form);
+        if (cue.type==2 && cue.object)
+            log("ammo_pouch_sound ammo=%08x sound=%08x",ammo,id(cue.object));
+    }
     flights.erase(std::remove_if(flights.begin(),flights.end(),
         [pc,now](Flight& flight){return finishFlight(flight,pc,now);}),flights.end());
     // JIP display names are session-local. Reapply the persistent slot marker on focus after loading.
@@ -710,6 +730,7 @@ void frame() {
 void __cdecl message(Message* msg) {
     switch (msg->type) {
     case 1: case 2: case 6: case 7: case 8: case 14:
+        host::takePouchReturn(0); host::takePouchReturn(1);
         host::forgetHolsters(); npc::reset(); loan={}; flights.clear(); pendingTake={}; restoring={}; reported=0; lastFocus=0; gated=3;
         loaded=msg->type==14 || (msg->type==8 && msg->data); return;
     case 20:
@@ -725,7 +746,7 @@ void __cdecl message(Message* msg) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE* n,Info* info) {
     if (!n || !info) return false;
-    *info={1,"TTWVR Field Weapons",12};
+    *info={1,"TTWVR Field Weapons",13};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE* n) {

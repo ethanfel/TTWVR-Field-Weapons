@@ -24,6 +24,36 @@ void writeBytes(void* address,const void* bytes,unsigned length) {
 }
 }
 
+// Run the original conditional jump in this disposable process. A return at each
+// successor stands in for the rest of the game. EBP points at a mock reload frame.
+extern "C" void exercisePouch(void* site,void* frame,int inside);
+asm("_exercisePouch: pushl %ebp; movl 12(%esp),%ebp; movl 8(%esp),%edx;"
+    "cmpl $0,16(%esp); call *%edx; popl %ebp; ret");
+
+void testPouch(host::Ptr base,bool current) {
+    assert(host::observePouchReturns());
+    unsigned char frame[0x2000]{}, ammo[0x10]{};
+    const int offset=current ? 0x1730 : 0x17b4;
+    auto ammoPtr=ammo;
+    std::memcpy(frame+sizeof frame-offset,&ammoPtr,sizeof ammoPtr);
+    ammo[4]=0x29;
+    unsigned id=0x4241;
+    std::memcpy(ammo+0xc,&id,4);
+    for (unsigned kind=0;kind<2;++kind) {
+        int site=current ? (kind ? 0x3d4c80 : 0x3d2132) : (kind ? 0x3b729e : 0x3b4a4c);
+        auto rounds=reinterpret_cast<int*>(base+(current ? (kind?0x1c1226c:0x1c12130) : (kind?0x19f694c:0x19f6810)));
+        const unsigned char ret=0xc3;
+        writeBytes(base+site+6,&ret,1);
+        writeBytes(base+site+6+(kind?0xe4:0x82),&ret,1);
+        for (int count : {0,7}) for (int inside : {0,1}) {
+            *rounds=count;
+            exercisePouch(base+site,frame+sizeof frame,inside);
+            assert(host::takePouchReturn(kind)==(inside && count ? id : 0));
+            assert(host::takePouchReturn(kind)==0 && *rounds==count);
+        }
+    }
+}
+
 int wmain(int argc,wchar_t** argv) {
     if (argc!=2) return 2;
     auto base=reinterpret_cast<host::Ptr>(LoadLibraryW(argv[1]));
@@ -56,6 +86,7 @@ int wmain(int argc,wchar_t** argv) {
     assert(host::observeHolsters() && host::observeHolsters());
     std::memcpy(&target,actionCall+1,4);
     assert(target!=originalTarget);
+    testPouch(base,current);
     for (auto slot : slots) {
         assert(*slot!=prior);
         auto poll=reinterpret_cast<Poll>(*slot);
@@ -75,6 +106,6 @@ int wmain(int argc,wchar_t** argv) {
             assert(!poll(nullptr,frame) && !host::input(hand).tracked);
         }
     }
-    std::printf("TTWVR %s: incompatible code rejected, both input chains passed\n",host::version());
+    std::printf("TTWVR %s: incompatible code rejected, both input chains and pouch return branches passed\n",host::version());
     return 0;
 }
